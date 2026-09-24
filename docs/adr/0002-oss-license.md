@@ -4,10 +4,11 @@
 | --- | --- |
 | ADR | **002** |
 | Title | OSS License |
-| Status | **PROPOSED** |
+| Status | **FROZEN** |
 | Date | 2026-09-24 |
+| Frozen | 2026-09-24 (FREEZE-004; basis AUDIT-004 PASS) |
 | Decision scope | Project-level open-source license for TX4 OSS distribution only |
-| Related Master Spec | §3 OSS Boundary; §4 Managed Cloud Boundary; §28 Licensing; §29 Commercial Model; §32 Grant & Fundraising Readiness; §36 Current Status (`LICENSE = OPEN`) |
+| Related Master Spec | §3 OSS Boundary; §4 Managed Cloud Boundary; §28 Licensing; §29 Commercial Model; §32 Grant & Fundraising Readiness; §36 Current Status |
 | Depends on | ADR-001 (Core Runtime Language = Rust) — FROZEN |
 | Supersedes | None |
 
@@ -15,21 +16,27 @@
 
 ## Status
 
-**PROPOSED** — not FROZEN.
+**FROZEN**
 
-Freeze requires: TASK-004 → AUDIT-004 → FREEZE-004.
+**TX4 project-level OSS license = Apache License 2.0 (Apache-2.0).**
 
-Until freeze and an authorized update of the repository `LICENSE` file, the placeholder `LICENSE` remains in force and no named OSS license should be assumed.
+This freeze selects the **project-level OSS license decision only**.
+
+It does **not** update the repository root `LICENSE` file. A separate authorized task must replace the placeholder `LICENSE` with the official Apache-2.0 text and evaluate `NOTICE` as applicable.
+
+It does **not** decide dependency/third-party license policy (ADR-003), OSS/Managed Cloud product boundary (ADR-008), trademark policy, CLA policy, commercial contract terms, documentation/SDK licensing schemes, or Managed Cloud proprietary licensing.
+
+Freeze path completed: TASK-004 → AUDIT-004 → FREEZE-004.
 
 ---
 
 ## Decision
 
-**Proposed project license: Apache License 2.0 (Apache-2.0).**
+**TX4 project-level OSS license = Apache License 2.0 (Apache-2.0).**
 
-This ADR decides **only** the project-level OSS license for TX4 open-source distribution.
+Status of this decision: **FROZEN**.
 
-It does **not** decide dependency/third-party license policy (ADR-003), OSS/Managed Cloud product boundary (ADR-008), trademark policy, CLA policy, commercial contract terms, or Managed Cloud proprietary licensing.
+Until an authorized LICENSE-file application task completes, the repository root `LICENSE` placeholder remains in place and must not be treated as the applied Apache-2.0 grant text.
 
 ---
 
@@ -137,7 +144,7 @@ Provide strong reciprocity on distribution (and AGPL on network use). That can b
 
 ## Decision Rationale
 
-**Apache License 2.0** is proposed because it best matches TX4’s combination of:
+**Apache License 2.0** was selected because it best matches TX4’s combination of:
 
 1. **Genuine OSS usability** — permissive terms support self-hosting, modification, and redistribution with well-understood notice obligations
 2. **Commercial and enterprise posture** — familiar to many enterprise reviewers for infrastructure software
@@ -155,7 +162,7 @@ Apache-2.0 is **not** proposed as a guarantee of adoption, fundraising success, 
 Intended model (product boundary details remain **ADR-008**):
 
 ```text
-TX4 OSS (Apache-2.0 proposed)
+TX4 OSS (Apache-2.0 — FROZEN project license; LICENSE file application pending)
   → self-hostable core and related OSS artifacts
 
 TX4 Managed Cloud (proprietary components as designed)
@@ -269,7 +276,7 @@ Explicitly **OPEN** / out of scope:
 
 ## Reconsideration Conditions
 
-Revisit this PROPOSED (or later FROZEN) decision only if objective evidence shows:
+Revisit this **FROZEN** decision only if objective evidence shows:
 
 1. Professional legal review identifies a material incompatibility with TX4’s documented OSS + Managed Cloud model that Apache-2.0 cannot reasonably address
 2. ADR-003 analysis shows the chosen project license cannot support a viable dependency posture for the Rust ecosystem TX4 needs
@@ -290,4 +297,4 @@ Preference alone is insufficient after freeze.
 * Master Spec §28 Licensing; §3–§4 OSS/Cloud boundaries
 * Current placeholder: repository root `LICENSE`
 
-**Legal notice:** This ADR is an architecture/product decision record. It is not legal advice. Before FREEZE-004 and before commercial reliance, obtain professional legal review appropriate to TX4’s jurisdictions and business model.
+**Legal notice:** This ADR is an architecture/product decision record. It is not legal advice. Before commercial reliance and before/as part of applying the Apache-2.0 text to the repository `LICENSE` file, obtain professional legal review appropriate to TX4’s jurisdictions and business model.
