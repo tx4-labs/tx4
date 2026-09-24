@@ -4,8 +4,9 @@
 | --- | --- |
 | ADR | **003** |
 | Title | Dependency / Third-Party License Policy |
-| Status | **PROPOSED** |
+| Status | **FROZEN** |
 | Date | 2026-09-24 |
+| Frozen | 2026-09-24 (FREEZE-006; basis AUDIT-006 PASS) |
 | Decision scope | Engineering governance policy for third-party dependency licensing, attribution, inventory, SBOM expectations, and review/exception process |
 | Related Master Spec | §3 OSS Boundary; §4 Managed Cloud Boundary; §25 Security; §27 OSS Governance; §28 Licensing; §29 Commercial Model |
 | Depends on | ADR-001 (Rust) — FROZEN; ADR-002 (Apache-2.0) — FROZEN |
@@ -15,9 +16,9 @@
 
 ## 1. Status
 
-**PROPOSED** — not FROZEN.
+**FROZEN**
 
-Freeze requires an independent audit and an explicit freeze task.
+Freeze path completed: TASK-006 → AUDIT-006 → FREEZE-006.
 
 This ADR is an **engineering governance control**. It is **not legal advice**. Compatibility, distribution obligations, linking models, and jurisdiction-specific effects may require professional legal review before relying on this policy in production commercial distribution.
 
