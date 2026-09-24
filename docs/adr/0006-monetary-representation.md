@@ -129,7 +129,7 @@ Arbitrary-precision decimal remains acceptable for **non-authoritative intermedi
 A `Money` value is valid only if:
 
 1. `currency` is present and identifies a supported catalog entry (or an explicitly documented unsupported/unknown handling path rejects the value), and
-2. `amount` is a finite integer within the representable range policy (§14), and
+2. `amount` is a finite integer within the representable range policy (§13), and
 3. no authoritative fractional atomic remainder remains (fractionals exist only as intermediates before rounding).
 
 ### Distinctions (must not be collapsed)
@@ -195,6 +195,7 @@ Precious-metal / special codes (for example `XAU`) and non-currency placeholders
 * Negative `amount` values are **permitted** in the representation for signed financial effects (for example adjustments, credits, reversals as recorded by TX4).
 * Interpreting a negative amount as a refund, debit, credit, or ledger posting is a **domain/lifecycle** concern and remains **OPEN** (ADR-007 / future ledger specs).
 * Representation allows signed values; it does not define when negatives are business-valid.
+* The **allocation primitive** (§11) does **not** accept negative `source.amount`. Negative adjustments/reversals must use separate explicit monetary operations; they must not silently reuse allocation semantics. This does not define refund/reversal lifecycle (ADR-007 remains OPEN).
 
 ---
 
@@ -229,17 +230,70 @@ Examples of boundaries:
 
 ### Canonical rounding mode
 
-When mapping an exact rational / higher-precision intermediate onto atomic units, TX4’s **default canonical rounding mode** is:
+When mapping an exact rational / higher-precision intermediate onto atomic units, TX4’s **default canonical rounding mode** remains:
 
 ```text
-half-even (banker's rounding) toward the currency atomic unit
+half-even (round half to even) onto the currency atomic grid
 ```
 
-Properties:
+This is a **mathematical** rule. It is not defined by any particular language, runtime, or library’s `round` function.
 
-* deterministic
-* unbiased for repeated half cases
-* reproducible across implementations that follow the same rule
+### Atomic-grid interpretation
+
+Let `x` be an exact rational quantity already expressed in **atomic units** of the target currency (possibly with a fractional atomic part). Rounding produces an integer atomic count `r` such that the authoritative `Money.amount = r`.
+
+Authoritative money has no fractional atomic part after rounding. Signed zero is not representable: if the mathematical result is zero, `r = 0` (a single zero; see §7).
+
+### Exact half
+
+Write the absolute value `|x|` as:
+
+```text
+|x| = i + f
+```
+
+where:
+
+* `i` is the greatest integer ≤ `|x|` (non-negative integer part; unambiguous for `|x| ≥ 0`)
+* `f` is the fractional part, `0 ≤ f < 1`
+
+An **exact half** means `f = 1/2` exactly (as a rational), i.e. `|x|` is exactly halfway between `i` and `i + 1`.
+
+### Normative half-even algorithm
+
+Let `s = +1` if `x ≥ 0`, and `s = -1` if `x < 0`.
+Let `|x| = i + f` as above.
+
+1. If `f < 1/2`: let `u = i`
+2. If `f > 1/2`: let `u = i + 1`
+3. If `f = 1/2` (exact half / tie):
+   * if `i` is **even**: let `u = i` (tie stays on the even retained atomic digit)
+   * if `i` is **odd**: let `u = i + 1` (tie moves to the next even atomic integer)
+4. Let `r = s × u`. If `r` would be “negative zero”, set `r = 0`.
+
+`i` even/odd refers to ordinary integer parity (`i mod 2 = 0` ⇒ even).
+
+### Examples (atomic units)
+
+| Intermediate `x` | `i` | `f` | Result `r` | Note |
+| --- | --- | --- | --- | --- |
+| `2` | 2 | 0 | `2` | already integer |
+| `2.4` | 2 | 0.4 | `2` | below half |
+| `2.6` | 2 | 0.6 | `3` | above half |
+| `2.5` | 2 | 0.5 | `2` | exact half; `i` even → stay |
+| `3.5` | 3 | 0.5 | `4` | exact half; `i` odd → to even |
+| `-2.4` | 2 | 0.4 | `-2` | sign applied after absolute half-even |
+| `-2.6` | 2 | 0.6 | `-3` | |
+| `-2.5` | 2 | 0.5 | `-2` | exact half; even `i` → `-2` |
+| `-3.5` | 3 | 0.5 | `-4` | exact half; odd `i` → `-4` |
+| `0.5` | 0 | 0.5 | `0` | exact half; `i=0` even → `0` |
+| `-0.5` | 0 | 0.5 | `0` | maps to single zero (no negative zero) |
+
+### Determinism requirements
+
+* Two independent implementations MUST produce identical `r` for the same exact rational `x`.
+* Do not delegate this definition to an implementation library.
+* Binary floating-point evaluation of `x` is not an acceptable way to decide half-even ties.
 
 ### Explicit overrides
 
@@ -249,7 +303,7 @@ A specific domain rule (fee schedule, tax rule, contractual allocation rule) MAY
 2. audit records capture which mode was applied, and
 3. the override does not silently change previously published results for the same rule version.
 
-Absent an explicit override, half-even applies.
+Absent an explicit override, half-even as defined above applies.
 
 ### Non-goals
 
@@ -285,23 +339,146 @@ Never:
 
 ## 11. Allocation Policy
 
-Splitting one `Money` into N parts (same currency) MUST preserve exact conservation:
+### Purpose
+
+The allocation primitive splits one authoritative `Money` into N recipient parts in the **same currency** without creating or destroying value.
+
+Invariant (mandatory):
 
 ```text
-sum(allocated[i].amount) == source.amount
+sum(parts[i].amount) == source.amount
+parts[i].currency == source.currency  for all i
 ```
 
-for all `i` in the same currency.
+This ADR defines the mathematical primitive only. Marketplace payout *business* rules remain out of scope.
 
-### Deterministic remainder distribution
+### Inputs
 
-When an even split is impossible in atomic units (example: 100 atomic units into 3 parts):
+* `source`: authoritative `Money`
+* `weights`: sequence `w[0] … w[n-1]` of **exact non-negative integers**, in a **stable recipient order** (index order is part of the contract; do not depend on hash-map iteration or unspecified map order)
 
-1. Compute a base quotient and remainder using exact integer division.
-2. Distribute the remainder **deterministically** (canonical default: give `+1` atomic unit to the first `remainder` recipients in stable index order, unless a documented domain rule specifies another deterministic order).
-3. Reject or fail closed if currencies differ across parts.
+Equal N-way split is the special case `w[i] = 1` for all `i`.
 
-This ADR does **not** define marketplace-specific payout business rules; it defines the conservation and determinism invariant for allocation primitives.
+### Rejection rules (fail closed)
+
+Reject the allocation (do not partially apply) if any of:
+
+1. `n < 1` (no recipients)
+2. `source.amount < 0` (**negative source amounts are prohibited** in this primitive — Option B)
+3. any `w[i] < 0`
+4. any `w[i]` is non-integer / non-exact
+5. `W = sum(w[i]) = 0` (all weights zero — including the empty-weight total)
+6. currency identity would not be preserved on every part
+7. any intermediate or output exceeds the representable range (§13) under checked arithmetic
+
+Negative adjustments, reversals, or signed splits MUST use a separate explicit monetary operation; they MUST NOT silently reuse this allocation primitive. Refund/reversal lifecycle remains OPEN (ADR-007).
+
+### Allowed source amounts
+
+* `source.amount > 0` — allocate as defined below
+* `source.amount = 0` — every `parts[i].amount = 0` (same currency); conservation holds
+
+### Normative weighted / pro-rata algorithm
+
+Use **exact integer arithmetic only**. Binary floating point is prohibited.
+
+Let:
+
+```text
+S = source.amount          // integer ≥ 0
+n = number of recipients   // n ≥ 1
+w[i] ≥ 0                   // integer weights
+W = sum_{i=0..n-1} w[i]    // W ≥ 1 after rejection rules
+```
+
+**Step 1 — exact proportional numerators**
+
+```text
+num[i] = S × w[i]          // exact integer; checked overflow → reject
+```
+
+**Step 2 — base shares (language-independent division)**
+
+Because `S ≥ 0`, `w[i] ≥ 0`, and `W ≥ 1`, all quantities are non-negative. Define Euclidean (non-negative) quotient and remainder:
+
+```text
+base[i] = floor(num[i] / W)     // greatest integer ≤ num[i]/W
+rem[i]  = num[i] - base[i] × W  // therefore 0 ≤ rem[i] < W
+```
+
+Equivalently: `num[i] = base[i] × W + rem[i]` with the constraints above. Do **not** use toward-zero vs floor distinctions from signed division; this algorithm never divides negative integers.
+
+**Step 3 — conservation gap**
+
+```text
+T = sum_{i=0..n-1} base[i]
+R = S - T                   // R is an integer, 0 ≤ R < n
+```
+
+`R` is the number of leftover atomic units that must still be distributed. Exact divisibility means `R = 0` (and typically all `rem[i] = 0` when each `num[i]` is divisible by `W`, but implementations MUST still compute `R` from `S - T`).
+
+**Step 4 — deterministic remainder distribution (largest remainder; stable ties)**
+
+If `R = 0`, set `parts[i].amount = base[i]` and finish.
+
+If `R > 0`, assign exactly `R` additional `+1` atomic units as follows:
+
+1. Build the list of recipient indices `i` where `w[i] > 0` (recipients with `w[i] = 0` keep `base[i] = 0` and never receive remainder units).
+2. Sort that list by:
+   * **primary key:** `rem[i]` descending (larger remainder first)
+   * **tie-break:** smaller index `i` first (stable recipient order)
+3. Give `+1` to the first `R` indices in that sorted list.
+4. Set `parts[i].amount = base[i]` plus `1` if selected, else `base[i]`.
+5. Set `parts[i].currency = source.currency`.
+
+Recipients with `w[i] = 0` always receive `0` when `S ≥ 0` under this algorithm (including when others receive remainder).
+
+### Single recipient
+
+If `n = 1` and `w[0] ≥ 1`, then `parts[0].amount = S` (and `R = 0`). If `w[0] = 0`, reject via `W = 0`.
+
+### Worked examples
+
+**Equal weights — `S = 100`, `w = [1,1,1]`:**
+
+* `W = 3`
+* `num = [100,100,100]`
+* `base = [33,33,33]`, `rem = [1,1,1]`
+* `T = 99`, `R = 1`
+* Ties on `rem`: indices ordered `0,1,2` → first `R=1` gets `+1`
+* Result: `[34, 33, 33]` (sum 100)
+
+**Unequal weights — `S = 100`, `w = [1,2,3]`:**
+
+* `W = 6`
+* `num = [100,200,300]`
+* `base = [16,33,50]`, `rem = [4,2,0]`
+* `T = 99`, `R = 1`
+* Largest remainder is index `0` (`rem=4`) → `+1`
+* Result: `[17, 33, 50]` (sum 100)
+
+**Exact divisibility — `S = 100`, `w = [1,1]`:**
+
+* Result: `[50, 50]`, `R = 0`
+
+**Zero source — `S = 0`, `w = [2,5]`:**
+
+* Result: `[0, 0]`
+
+**Zero weight among others — `S = 10`, `w = [1,0,1]`:**
+
+* `W = 2`
+* `num = [10,0,10]`
+* `base = [5,0,5]`, `rem = [0,0,0]`
+* `R = 0` → `[5, 0, 5]`
+
+### Determinism
+
+Two independent implementations MUST produce identical `parts[i].amount` sequences for the same `S`, currency, and ordered weight vector. No binary float; no unspecified ordering.
+
+### Non-goals
+
+This ADR does **not** define marketplace-specific payout business rules beyond the conservation-preserving primitive above.
 
 ---
 
@@ -313,7 +490,7 @@ Conceptual requirement:
 
 * Arithmetic that exceeds the representable range MUST **fail checked** (error / rejection), not wrap.
 * Implementations MAY use a wider intermediate type for multiply/divide intermediates, then check the final atomic result against the representable range.
-* Arbitrary-precision intermediates are allowed for calculation safety; the **durable authoritative `Money` amount** remains a checked integer range (§14).
+* Arbitrary-precision intermediates are allowed for calculation safety; the **durable authoritative `Money` amount** remains a checked integer range (§13).
 
 No Rust crate is selected by this ADR.
 
