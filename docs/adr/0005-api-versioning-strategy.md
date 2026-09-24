@@ -4,8 +4,9 @@
 | --- | --- |
 | ADR | **005** |
 | Title | API Versioning Strategy |
-| Status | **PROPOSED** |
+| Status | **FROZEN** |
 | Date | 2026-09-24 |
+| Frozen | 2026-09-24 (FREEZE-008; basis AUDIT-010 PASS) |
 | Decision scope | Canonical public REST API versioning strategy for TX4 (identifier placement, compatibility, deprecation, sunset, SDK/OpenAPI relationship) |
 | Related Master Spec | §19 API; §20 SDK; §24 Dogfood Applications; §31 Production-Grade; §34 Architecture Rule; §36 Current Status (`API = PROPOSED`) |
 | Depends on | ADR-001 (Rust) — FROZEN; ADR-002 (Apache-2.0) — FROZEN; ADR-003 — FROZEN; ADR-004 (SoT / durability) — FROZEN |
@@ -15,9 +16,9 @@
 
 ## 1. Status
 
-**PROPOSED** — not FROZEN.
+**FROZEN**
 
-Freeze requires independent audit and an explicit freeze task.
+Freeze path completed: TASK-008 → AUDIT-010 → FREEZE-008.
 
 This ADR does **not** select HTTP frameworks, OpenAPI generators, API gateways, authentication mechanisms, databases, payment adapters, transaction lifecycle enums, or monetary representation.
 
