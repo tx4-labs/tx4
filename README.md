@@ -6,7 +6,7 @@
 
 **Status:** Early development — repository foundation only
 **Domain:** [tx4.xyz](https://tx4.xyz)
-**License:** OPEN (see [LICENSE](LICENSE); decision pending ADR-002)
+**License:** [Apache License 2.0](LICENSE) (ADR-002 FROZEN; LICENSE file applied)
 
 ---
 
