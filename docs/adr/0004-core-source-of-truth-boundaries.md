@@ -4,8 +4,9 @@
 | --- | --- |
 | ADR | **004** |
 | Title | Core Source-of-Truth Boundaries |
-| Status | **PROPOSED** |
+| Status | **FROZEN** |
 | Date | 2026-09-24 |
+| Frozen | 2026-09-24 (FREEZE-007; basis AUDIT-008 PASS) |
 | Decision scope | Authority boundaries, durability/crash-recovery requirements, idempotency and reconciliation principles for TX4 durable transaction infrastructure |
 | Related Master Spec | §7 Transaction Model; §8 Payment Boundary; §9 Financial Correctness; §10 Fees; §11 Billing & Usage; §13 Ledger; §14 Settlement; §15 Reconciliation; §16 Idempotency; §17 Webhooks; §18 Multi-Tenancy; §31 Production-Grade; §36 Current Status |
 | Depends on | ADR-001 (Rust) — FROZEN; ADR-002 (Apache-2.0) — FROZEN; ADR-003 (Dependency license policy) — FROZEN |
@@ -15,9 +16,9 @@
 
 ## 1. Status
 
-**PROPOSED** — not FROZEN.
+**FROZEN**
 
-Freeze requires independent audit and an explicit freeze task.
+Freeze path completed: TASK-007 → AUDIT-008 → FREEZE-007.
 
 This ADR defines **authority and durability properties**. It does **not** select persistence technology, event-sourcing adoption, queue/workflow engines, monetary representation, or the exact transaction state machine.
 
