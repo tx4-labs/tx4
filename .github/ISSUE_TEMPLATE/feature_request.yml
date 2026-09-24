@@ -1,0 +1,64 @@
+name: Feature request
+description: Propose a capability or improvement for TX4
+title: "[feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests start a discussion. They are **not** automatic implementation authorization.
+
+        Material architecture changes require an ADR or explicit maintainer decision.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed capability
+      description: What should TX4 provide?
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: Who benefits and how would this be used?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What alternatives exist today?
+    validations:
+      required: false
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility considerations
+      description: Impact on API stability, self-hosting, Managed Cloud, licenses, or existing semantics.
+    validations:
+      required: false
+  - type: dropdown
+    id: adr_needed
+    attributes:
+      label: May an ADR be required?
+      description: Material architecture, financial semantics, licensing, or API contract changes typically need an ADR.
+      options:
+        - "Unsure"
+        - "Yes — architecture / semantics / contract impact likely"
+        - "No — documentation or non-architectural improvement"
+    validations:
+      required: true
+  - type: checkboxes
+    id: authorization
+    attributes:
+      label: Acknowledgement
+      options:
+        - label: I understand this request does not authorize implementation by itself.
+          required: true

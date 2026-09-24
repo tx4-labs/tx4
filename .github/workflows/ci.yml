@@ -1,0 +1,220 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  foundation:
+    name: Repository foundation checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Required files present
+        run: |
+          set -euo pipefail
+          required=(
+            README.md
+            AGENTS.md
+            CONTRIBUTING.md
+            CODE_OF_CONDUCT.md
+            SECURITY.md
+            GOVERNANCE.md
+            ROADMAP.md
+            CHANGELOG.md
+            LICENSE
+            .gitignore
+            .editorconfig
+            docs/MASTER-SPEC.md
+            docs/adr/README.md
+            .github/PULL_REQUEST_TEMPLATE.md
+            .github/ISSUE_TEMPLATE/bug_report.yml
+            .github/ISSUE_TEMPLATE/feature_request.yml
+            .github/workflows/ci.yml
+          )
+          missing=0
+          for path in "${required[@]}"; do
+            if [[ ! -e "$path" ]]; then
+              echo "MISSING: $path"
+              missing=1
+            else
+              echo "OK: $path"
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            echo "Required foundation files are missing."
+            exit 1
+          fi
+
+      - name: Reject unauthorized implementation directories
+        run: |
+          set -euo pipefail
+          # TASK-001 / foundation policy: no core implementation trees yet.
+          forbidden=(
+            src
+            crates
+            migrations
+            sdk
+            adapters
+            deploy
+            terraform
+          )
+          found=0
+          for path in "${forbidden[@]}"; do
+            if [[ -e "$path" ]]; then
+              echo "UNEXPECTED IMPLEMENTATION PATH: $path"
+              found=1
+            fi
+          done
+          if [[ "$found" -ne 0 ]]; then
+            echo "Implementation directories are not authorized at the foundation stage."
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate YAML syntax
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet PyYAML
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+
+          import yaml
+
+          roots = [
+              Path(".github/workflows"),
+              Path(".github/ISSUE_TEMPLATE"),
+          ]
+          files = []
+          for root in roots:
+              if root.exists():
+                  files.extend(sorted(root.rglob("*.yml")))
+                  files.extend(sorted(root.rglob("*.yaml")))
+
+          if not files:
+              print("No YAML files found under .github/", file=sys.stderr)
+              sys.exit(1)
+
+          errors = 0
+          for path in files:
+              try:
+                  with path.open("r", encoding="utf-8") as handle:
+                      list(yaml.safe_load_all(handle))
+                  print(f"YAML OK: {path}")
+              except Exception as exc:  # noqa: BLE001 - report any parse failure
+                  print(f"YAML FAIL: {path}: {exc}", file=sys.stderr)
+                  errors += 1
+
+          if errors:
+              sys.exit(1)
+          PY
+
+      - name: Basic secret leakage scan (tracked files)
+        run: |
+          set -euo pipefail
+          # Conservative heuristic scan of tracked text files. Not a substitute for full secret scanning.
+          python3 - <<'PY'
+          import re
+          import subprocess
+          import sys
+
+          patterns = [
+              ("AWS access key id", re.compile(r"AKIA[0-9A-Z]{16}")),
+              ("Private key block", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
+              ("GitHub PAT", re.compile(r"ghp_[A-Za-z0-9]{36}")),
+              ("Generic api_key assignment", re.compile(r"(?i)api[_-]?key\s*=\s*['\"][^'\"]{12,}['\"]")),
+              ("Generic secret assignment", re.compile(r"(?i)secret\s*=\s*['\"][^'\"]{12,}['\"]")),
+          ]
+
+          # Allowlist documentation phrases that discuss secrets without embedding them.
+          allow_substrings = [
+              "Never commit",
+              "Do not invent",
+              "placeholder",
+              "SECURITY.md",
+          ]
+
+          result = subprocess.run(
+              ["git", "ls-files"],
+              check=True,
+              capture_output=True,
+              text=True,
+          )
+          paths = [line for line in result.stdout.splitlines() if line]
+
+          binary_suffixes = {
+              ".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip",
+              ".gz", ".tgz", ".xz", ".wasm", ".so", ".dll", ".exe",
+          }
+
+          findings = []
+          for path in paths:
+              if any(path.lower().endswith(suffix) for suffix in binary_suffixes):
+                  continue
+              try:
+                  text = open(path, "r", encoding="utf-8").read()
+              except UnicodeDecodeError:
+                  continue
+
+              for name, pattern in patterns:
+                  for match in pattern.finditer(text):
+                      snippet = text[max(0, match.start() - 40): match.end() + 40]
+                      if any(allow in snippet for allow in allow_substrings) and name.startswith("Generic"):
+                          continue
+                      findings.append(f"{path}: possible {name}: {match.group(0)[:24]}...")
+
+          if findings:
+              print("Potential secret material detected:", file=sys.stderr)
+              for item in findings:
+                  print(item, file=sys.stderr)
+              sys.exit(1)
+
+          print(f"Secret heuristic scan passed for {len(paths)} tracked files.")
+          PY
+
+      - name: Master Spec status labels preserved
+        run: |
+          set -euo pipefail
+          file="docs/MASTER-SPEC.md"
+          required_lines=(
+            "PRODUCT THESIS       = PROPOSED"
+            "OSS/CLOUD BOUNDARY   = PROPOSED"
+            "CORE DOMAIN          = PROPOSED"
+            "RUNTIME              = OPEN"
+            "LICENSE              = OPEN"
+            "API                  = PROPOSED"
+            "BILLING MODEL        = PROPOSED"
+            "DOGFOOD STRATEGY     = PROPOSED"
+            "REPOSITORY STANDARD  = PROPOSED"
+            "PRODUCTION TARGET    = FROZEN AS OBJECTIVE"
+          )
+          for line in "${required_lines[@]}"; do
+            if ! grep -Fqx "$line" "$file"; then
+              # Allow Master Spec variant with "(Rust candidate)" on RUNTIME line.
+              if [[ "$line" == "RUNTIME              = OPEN" ]]; then
+                if grep -Eq '^RUNTIME[[:space:]]+= OPEN' "$file"; then
+                  echo "OK (variant): RUNTIME = OPEN"
+                  continue
+                fi
+              fi
+              echo "Missing or altered status line: $line"
+              exit 1
+            fi
+            echo "OK: $line"
+          done

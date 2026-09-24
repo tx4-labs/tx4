@@ -1,0 +1,19 @@
+# License
+
+**Status: OPEN**
+
+TX4 has not yet selected an open-source license.
+
+The license decision is deferred to:
+
+```text
+ADR-002 — OSS License
+```
+
+Until ADR-002 is accepted and this file is updated:
+
+* Do not assume MIT, Apache-2.0, or any other specific license applies.
+* Do not copy or integrate third-party code without a license compatibility review (see also ADR-003).
+* Contributions are accepted under the understanding that the eventual project license will apply once selected through the ADR process; contributors who cannot agree to that process should wait until ADR-002 is frozen.
+
+This file is intentionally a placeholder, not a grant of rights under a named license.

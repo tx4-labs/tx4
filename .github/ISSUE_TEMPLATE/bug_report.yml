@@ -1,0 +1,79 @@
+name: Bug report
+description: Report a defect in TX4 documentation, governance, CI, or (later) software
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug.
+
+        **Do not include secrets, credentials, payment data, or sensitive vulnerability details.**
+        For security issues, follow SECURITY.md instead of this form.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Clear summary of the bug.
+      placeholder: What went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Steps to reproduce the issue.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, runtime, deployment method, and other relevant environment details.
+      placeholder: |
+        OS:
+        Runtime (if applicable):
+        How you ran TX4 (if applicable):
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Release version or git commit SHA.
+      placeholder: e.g. main @ abcdef1
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (safe excerpts only)
+      description: Paste relevant logs with secrets redacted. Never paste API keys, tokens, passwords, or private keys.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: security_warning
+    attributes:
+      label: Sensitivity confirmation
+      options:
+        - label: I confirm this report does not include secrets or sensitive vulnerability details.
+          required: true
