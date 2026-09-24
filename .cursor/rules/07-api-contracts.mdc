@@ -1,0 +1,29 @@
+---
+description: TX4 public API and contract discipline — versioning, idempotency, no casual breaks
+alwaysApply: true
+---
+
+# API / Contract Discipline
+
+Applies when API work is authorized. API versioning strategy remains OPEN until ADR-005 is frozen.
+
+## Required
+
+- Preserve explicit public contracts
+- Validate inputs
+- Define consistent error behavior
+- Respect idempotency semantics for repeatable operations
+- Document breaking changes before shipping them
+- Avoid leaking internal implementation details
+- Keep provider-specific payment concepts behind adapters
+- Request correlation / rate-limit headers where appropriate
+
+## OpenAPI
+
+When API implementation is authorized, OpenAPI represents the public contract. Keep it authoritative and current.
+
+## Prohibited without authorization
+
+- Casually renaming public fields or states
+- Silently changing error codes / lifecycle enums exposed publicly
+- Creating a new public API shape that contradicts Master Spec or a FROZEN ADR

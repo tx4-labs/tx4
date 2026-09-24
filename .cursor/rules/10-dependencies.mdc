@@ -1,0 +1,25 @@
+---
+description: TX4 dependency discipline — justify, license-check, respect ADR-003 when frozen
+alwaysApply: true
+---
+
+# Dependency Discipline
+
+## Required before adding a dependency
+
+1. Clear purpose
+2. Prefer mature, maintained projects
+3. Inspect license compatibility (final policy via ADR-002 / ADR-003)
+4. Avoid unnecessary expansion and duplicate libraries for the same job
+5. Pin / lock versions appropriately when implementation exists
+6. Review transitive risk and security history
+7. Record material dependency decisions
+
+## Prohibited
+
+- Adding a dependency only to save a few lines of code
+- Copying third-party code without license compliance review
+- Using AGPL/GPL/copyleft in a way that creates unintended project obligations
+- Making final license-compatibility claims before ADR-002 and ADR-003 are frozen
+
+Until ADR-003 is FROZEN: do not silently establish lasting dependency policy through code. Propose ADR when the choice is architectural.

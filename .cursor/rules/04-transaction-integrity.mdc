@@ -1,0 +1,30 @@
+---
+description: TX4 transaction integrity — lifecycle, idempotency, retries, no duplicate financial effects
+alwaysApply: true
+---
+
+# Transaction Integrity
+
+When transaction implementation is authorized:
+
+## Required
+
+- Explicit transaction lifecycle per applicable FROZEN ADR / domain spec (ADR-007 when frozen)
+- Explicit, allowed state transitions only
+- Idempotency for externally repeatable operations
+- Safe retry semantics (no duplicate financial effects)
+- Atomicity where the domain requires it
+- Clear failure handling and exceptional states
+- No accidental duplicate charging
+- No accidental duplicate settlement
+- No ambiguous ownership of financial state
+
+## Prohibited
+
+- Inventing transaction states that conflict with the applicable specification
+- Treating webhook/provider events as unquestioned truth without verification rules
+- Completing settlement solely because an internal flag changed when external verification is required
+
+## OPEN lifecycle
+
+Until ADR-007 is FROZEN, do not silently invent the canonical state machine in code. Propose ADR / wait for authorization.

@@ -1,0 +1,38 @@
+---
+description: TX4 implementation discipline — minimal coherent changes when implementation is authorized
+alwaysApply: true
+---
+
+# Implementation Discipline
+
+Applies only when a task **explicitly authorizes** implementation.
+
+## Required behavior
+
+- Inspect existing code before creating new code
+- Prefer minimal coherent changes
+- Do not rewrite working systems without authorization
+- Do not introduce unnecessary abstractions
+- Do not add speculative infrastructure
+- Do not add dependencies without justification (see dependency rules + ADR-003 when frozen)
+- Do not create vertical-specific hacks in generic infrastructure
+- Preserve public API compatibility unless explicitly authorized
+
+## Scope control
+
+- Implement only what the authorizing task permits
+- Avoid unrelated formatting churn
+- Do not create empty implementation directories for appearance
+- Do not fabricate validation results
+
+## After editing
+
+1. Run appropriate validation
+2. Inspect `git diff`
+3. Check scope leakage and architecture drift
+4. Check for accidental secrets
+5. Report exact changes, tests executed, and unresolved issues
+
+## Not authorized by default
+
+Do not create `Cargo.toml`, `src/`, `crates/`, migrations, APIs, SDKs, payment/ledger/billing/settlement/reconciliation, or cloud infra unless the task explicitly authorizes that work.

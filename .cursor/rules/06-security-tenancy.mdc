@@ -1,0 +1,37 @@
+---
+description: TX4 security and multi-tenancy — least privilege, secrets, tenant isolation
+alwaysApply: true
+---
+
+# Security and Multi-Tenancy
+
+## Security required
+
+- Least privilege
+- Explicit authentication and authorization boundaries
+- Tenant isolation by design
+- Secret hygiene (never hardcode or commit secrets)
+- Input validation
+- Safe error handling (no sensitive leakage)
+- Dependency review
+- Secure defaults
+- Auditability for sensitive operations
+
+## Never
+
+- Commit API keys, tokens, private keys, passwords, JWT secrets, payment credentials
+- Weaken authentication to simplify tests
+- Bypass authorization for convenience
+- Disable security controls merely to make CI pass
+
+Security exceptions require **explicit documentation** and authorization.
+
+## Multi-tenancy
+
+- Every tenant-scoped object/operation needs an explicit ownership / security model
+- Do **not** assume `authenticated = authorized`
+- Require authorization checks appropriate to the operation
+- Never introduce cross-tenant access accidentally
+- Do not rely solely on frontend checks
+
+If tenant boundaries are unclear for a change: **STOP and report**.

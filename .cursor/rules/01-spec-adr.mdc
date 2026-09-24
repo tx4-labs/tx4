@@ -1,0 +1,57 @@
+---
+description: TX4 specification-first pipeline and ADR discipline — no skipped architecture gates
+alwaysApply: true
+---
+
+# Specification-First / ADR Discipline
+
+## Required pipeline
+
+```text
+Vision
+→ Master Spec
+→ ADR
+→ Audit
+→ Freeze
+→ Implementation
+→ Tests
+→ Independent Audit
+→ Remediation
+→ Re-audit
+→ Release
+```
+
+Do **not** skip an architecture gate because implementation looks easy.
+
+## No architecture by code
+
+Never introduce architecture through implementation alone.
+
+Prohibited silent decisions include:
+
+- choosing a canonical payment provider
+- creating a second ledger / competing balances
+- changing money representation
+- cloud-only behavior inside OSS core
+- vertical-specific domain logic in core
+- new persistence model
+- new public API contract
+- new billing model
+- changing transaction semantics
+
+If a change is architectural: **document (ADR / Master Spec) before implementing**.
+
+## Current architecture stage
+
+Until ADRs ADR-001…ADR-008 are frozen:
+
+- Do not silently decide runtime, license, dependency policy, SoT boundaries, API versioning, money representation, transaction lifecycle, or OSS/Cloud boundary.
+- Identify the missing decision, propose the smallest ADR/spec change, wait for authorization.
+
+## Conflict handling
+
+If task, Master Spec, ADR, AGENTS.md, or rules conflict:
+
+```text
+STOP → REPORT THE CONFLICT → DO NOT SILENTLY RESOLVE
+```

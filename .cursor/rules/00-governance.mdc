@@ -1,0 +1,71 @@
+---
+description: TX4 global governance — authority hierarchy, frozen/open decisions, agent role
+alwaysApply: true
+---
+
+# TX4 Global Governance
+
+Cursor is an **implementation assistant**, not the architect.
+
+## Authority priority (highest first)
+
+```text
+Explicit user / task authorization
+→ Frozen architecture / ADR decisions
+→ docs/MASTER-SPEC.md
+→ AGENTS.md
+→ Repository governance (GOVERNANCE.md, CONTRIBUTING.md)
+→ Applicable Cursor Rules
+→ Existing implementation conventions
+→ Cursor preference
+```
+
+Cursor preference never overrides a **FROZEN** decision.
+
+## Before any edit
+
+1. Read relevant `docs/MASTER-SPEC.md` sections
+2. Read accepted / FROZEN ADRs under `docs/adr/`
+3. Obey `AGENTS.md`
+4. Inspect repository + git state
+5. Identify scope, FROZEN constraints, and OPEN decisions
+6. Implement only authorized work
+
+## Decision status language
+
+Use only evidence-backed labels:
+
+`PROPOSED` | `OPEN` | `DECIDED` | `ACCEPTED` | `FROZEN` | `IMPLEMENTED` | `VERIFIED`
+
+- Do not treat OPEN as FROZEN.
+- Do not invent undocumented requirements.
+- Do not silently change FROZEN decisions.
+
+## FROZEN conflict response
+
+```text
+STOP
+REPORT: conflicting requirement, file, frozen decision, reason, proposed resolution path
+```
+
+Do not reinterpret, weaken, substitute technology, or edit Master Spec / ADR around a freeze unless explicitly authorized.
+
+## OPEN decision response
+
+```text
+IDENTIFY → DOCUMENT → REQUEST / PROPOSE ADR → WAIT FOR AUTHORIZATION
+```
+
+Reasonable defaults are allowed only when they have **no architectural consequence**.
+
+## Solo-developer principle
+
+Optimize for clarity, maintainability, deterministic behavior, low operational complexity, small reviewable changes.
+
+Do not add premature microservices, speculative scale, or ceremony for hypothetical teams.
+
+## Production-grade standard
+
+Production-grade means explicit contracts, deterministic behavior, failure handling, security, observability, tests, migrations, documentation, reproducibility, operational clarity, auditability.
+
+`compiles ≠ production-ready`. `tests pass ≠ architecture correct`.

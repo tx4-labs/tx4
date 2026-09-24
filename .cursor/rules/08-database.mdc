@@ -1,0 +1,31 @@
+---
+description: TX4 database discipline — explicit migrations, invariants, no silent schema-as-spec
+alwaysApply: true
+---
+
+# Database Discipline
+
+Applies when database / schema work is **explicitly authorized**.
+
+## Required
+
+- Explicit, reviewable migrations
+- Constraints should enforce important invariants where appropriate
+- Destructive migrations require explicit handling and authorization
+- Indexes must have a stated reason
+- Database transactions must be intentional
+- Schema must not silently become a second business specification
+
+## Financial schema
+
+Never change financial schema semantics solely for ORM / query convenience.
+
+If schema change conflicts with a FROZEN monetary, ledger, or SoT ADR:
+
+```text
+STOP and report.
+```
+
+## Persistence model
+
+Choosing or changing the persistence model is architectural. Do not invent it outside ADR / Master Spec authorization.

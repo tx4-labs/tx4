@@ -1,0 +1,48 @@
+---
+description: TX4 authority boundaries — source of truth, OSS vs Cloud, vertical-agnostic core
+alwaysApply: true
+---
+
+# Source-of-Truth, OSS/Cloud, and Vertical Boundaries
+
+## Source-of-truth (conceptual)
+
+```text
+PostgreSQL → TX4 domain persistence
+TX4 core → business / domain authority
+External payment provider → provider-side payment authority
+Reconciliation → TX4 orchestration of differences (explicit records)
+```
+
+- Do not create competing authoritative balances or duplicated SoT without an explicit ADR
+- Provider-specific concepts stay behind adapters; do not leak into public TX4 API
+- If a SoT boundary is unclear: **STOP and report** (ADR-004 when resolving)
+
+## OSS vs Managed Cloud
+
+```text
+TX4 OSS → core transaction infrastructure (self-hostable)
+TX4 Managed Cloud → proprietary hosted control plane / operations
+```
+
+Do not:
+
+- move proprietary cloud functionality into OSS without authorization
+- cripple OSS for artificial commercial differentiation
+- leak managed-cloud assumptions into the core domain
+- introduce SaaS-only dependencies into OSS core without an explicit decision
+
+Exact boundary remains OPEN until ADR-008 is frozen — do not silently decide it.
+
+## Vertical-agnostic core
+
+Dogfood apps (canteen, booking, marketplace) **consume** TX4; they do not define it.
+
+Forbidden in generic core:
+
+```text
+if vertical == "canteen" / "booking" / "marketplace"
+```
+
+- Reusable need → extract a generic infrastructure primitive
+- Vertical-specific need → keep outside core

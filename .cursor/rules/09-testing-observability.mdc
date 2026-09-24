@@ -1,0 +1,35 @@
+---
+description: TX4 testing and observability — evidence-based verification; no fabricated results
+alwaysApply: true
+---
+
+# Testing and Observability
+
+## Testing (when code exists / tests are authorized)
+
+Distinguish: unit, integration, database integration, API contract, invariant, regression, security tests.
+
+For financial / transactional behavior prioritize:
+
+```text
+invariants + failure cases + idempotency + state transitions
+```
+
+not only happy paths.
+
+## Absolute
+
+- Never report a test as passing unless it was actually executed
+- Never weaken/delete tests merely to make CI pass
+- Never claim production readiness merely because tests pass
+- A failing test is evidence of a problem until proven otherwise
+
+## Observability (when runtime is authorized)
+
+- Structured logging
+- Tracing where appropriate
+- Preserve correlation / request identifiers
+- Never log secrets or unnecessary sensitive financial/PII data
+- Make transaction lifecycle and failures diagnosable
+
+Observability must not become a sensitive-data leak channel.

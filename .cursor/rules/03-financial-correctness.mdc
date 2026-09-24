@@ -1,0 +1,38 @@
+---
+description: TX4 financial correctness — no floating-point money; honor frozen monetary ADR
+alwaysApply: true
+---
+
+# Financial Correctness
+
+Money is **correctness-critical**.
+
+## Mandatory
+
+- Never use binary floating point for monetary values
+- Use the monetary representation selected by the applicable **FROZEN** ADR (ADR-006 when frozen)
+- Preserve explicit currency on every monetary value
+- No implicit currency conversion
+- Deterministic calculations only
+- Rounding must be explicit and documented
+- Fee calculations must be deterministic, auditable, and reproducible
+- Treat financial invariants as correctness requirements, not comments
+- Never silently alter money semantics for convenience or library preference
+
+## OPEN monetary representation
+
+Until ADR-006 is FROZEN:
+
+- Do not silently lock a representation in production code
+- Candidate guidance in Master Spec is not a freeze
+- Propose ADR / wait for authorization before implementing money storage/API semantics
+
+## Conflict
+
+If implementation conflicts with a frozen monetary representation:
+
+```text
+STOP and report the conflict.
+```
+
+Do not substitute another representation because a library is easier.

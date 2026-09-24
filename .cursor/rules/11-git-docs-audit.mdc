@@ -1,0 +1,38 @@
+---
+description: TX4 git, documentation honesty, and audit task discipline
+alwaysApply: true
+---
+
+# Git, Documentation, and Audit Discipline
+
+## Git / change control
+
+Before work: inspect `git status`, baseline, and branch.
+
+- Keep changes scoped; inspect final diff
+- Avoid unrelated formatting churn
+- Descriptive Conventional Commits when committing is authorized
+- Never rewrite history, force-push, or push unless the task explicitly authorizes it
+- If the worktree has unrelated user changes: **preserve them** — do not discard
+
+## Documentation honesty
+
+Documentation must match repository evidence.
+
+Never claim implemented / production-ready / supported / deployed / secure / audited / compliant without evidence.
+
+Use explicit status labels (`PROPOSED`, `OPEN`, `DECIDED`, `ACCEPTED`, `FROZEN`, `IMPLEMENTED`, `VERIFIED`).
+
+Do not hide unfinished work with ambiguous marketing language.
+
+## Audit tasks
+
+| Task type | May modify |
+| --- | --- |
+| Implementation | Implementation (if authorized) |
+| Specification | Specs / ADRs (if authorized) |
+| Audit | **Read-only** unless remediation is explicitly authorized |
+
+Independent audits: `inspect → report → stop`.
+
+An audit must not silently remediate its own findings.
