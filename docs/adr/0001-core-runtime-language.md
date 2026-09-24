@@ -4,10 +4,11 @@
 | --- | --- |
 | ADR | **001** |
 | Title | Core Runtime Language |
-| Status | **PROPOSED** |
+| Status | **FROZEN** |
 | Date | 2026-09-24 |
+| Frozen | 2026-09-24 (FREEZE-003; basis AUDIT-003 PASS) |
 | Decision scope | Core runtime language for TX4 only |
-| Related Master Spec | §5 Core Design Principle; §21 Core Runtime; §22 Deployment; §25 Security; §26 Observability; §31 Production-Grade Requirement; §36 Current Status (`RUNTIME = OPEN`) |
+| Related Master Spec | §5 Core Design Principle; §21 Core Runtime; §22 Deployment; §25 Security; §26 Observability; §31 Production-Grade Requirement; §36 Current Status |
 | Supersedes | None |
 
 ---
@@ -27,7 +28,7 @@ The core must support production transactional workloads where:
 * transaction state must remain durable
 * reconciliation must remain possible
 
-The Master Spec lists **Rust** as a candidate default for the core runtime, subject to this ADR before implementation freeze (`RUNTIME` remains **OPEN** until this ADR is independently audited and frozen).
+The Master Spec listed **Rust** as a candidate default for the core runtime. This ADR has been independently audited (AUDIT-003 PASS) and is now **FROZEN**.
 
 An explicit language decision is required before Core Foundation implementation because it constrains:
 
@@ -110,17 +111,19 @@ Qualitative comparison only. No numeric scores, weights, rankings, or winner/los
 
 ## Decision
 
-**Select Rust as the core runtime language for TX4.**
+**TX4 Core Runtime Language = Rust.**
 
-Status of this decision: **PROPOSED** (not FROZEN).
+Status of this decision: **FROZEN**.
 
-Implementation of TX4 core in Rust is **not authorized** until this ADR passes independent audit and is explicitly frozen.
+This freeze selects the **language only**. It does **not** select HTTP frameworks, database drivers, persistence/durability architecture, payment/ledger architecture, API versioning, monetary representation, transaction lifecycle, license, or dependency policy.
+
+Rust application implementation remains unauthorized until later implementation tasks explicitly authorize it after required remaining ADRs are addressed per governance.
 
 ---
 
 ## Rationale
 
-Rust is proposed because it best matches TX4’s combination of:
+Rust was selected because it best matches TX4’s combination of:
 
 1. **Correctness-oriented boundaries** — strong static typing and exhaustive enum/match patterns support explicit transaction and payment state machines once ADR-007 (and related specs) exist. This assists invalid-state prevention; it does not guarantee financial correctness.
 2. **Infrastructure suitability** — well suited to long-running services that must handle concurrent requests, webhooks, workers, and careful failure paths without a heavy managed runtime.
@@ -199,7 +202,7 @@ Master Spec §21 candidate stack names (Axum, Tokio, SQLx, etc.) remain **illust
 
 ## Reconsideration Conditions
 
-Revisit this PROPOSED (or later FROZEN) decision only if objective evidence shows one or more of:
+Revisit this **FROZEN** decision only if objective evidence shows one or more of:
 
 1. Critical ecosystem gap that blocks production-grade PostgreSQL, observability, or secure deployment for TX4’s scope
 2. Sustained inability to maintain the core with available contributors despite reasonable onboarding investment
@@ -213,21 +216,19 @@ Preference or familiarity alone is not sufficient to reopen the decision after f
 
 ## Relationship to Future ADRs
 
-Once this ADR is **FROZEN**:
+This ADR is **FROZEN**:
 
 * Later ADRs and implementation tasks must treat Rust as the core runtime language
 * Framework, driver, and durability ADRs must be expressed within a Rust implementation context unless this ADR is formally superseded
 * OPEN decisions (license, money, lifecycle, SoT, API versioning, OSS/Cloud boundary) remain independently decidable and must not be smuggled into Rust “defaults”
+* No Rust application implementation is authorized by this freeze alone
 
-Until freeze:
-
-* No Rust application implementation is authorized by this document
-* `RUNTIME` in the Master Spec remains **OPEN** pending audit/freeze gates
+Master Spec §36 may still list `RUNTIME` with pre-freeze wording until an authorized status-synchronization update; **this ADR is the authoritative freeze record** for the core runtime language.
 
 ---
 
 ## Notes for Reviewers
 
-* This ADR proposes Rust; it does **not** claim Rust guarantees correctness or security.
+* This ADR freezes Rust as the core runtime language; it does **not** claim Rust guarantees correctness or security.
 * Comparative analysis is qualitative and requirement-driven.
-* Independent audit (AUDIT-003) must verify scope, non-decisions, and absence of unauthorized freezes before any freeze gate.
+* AUDIT-003 PASS is the basis for FREEZE-003.

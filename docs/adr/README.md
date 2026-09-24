@@ -2,13 +2,13 @@
 
 This directory holds Architecture Decision Records (ADRs) for TX4.
 
-No ADRs have been **accepted** or **FROZEN** yet.
+ADR-001 is **FROZEN**. No other ADRs have been accepted or frozen yet.
 
 ## ADR index
 
 | ADR | Document | Topic | Status |
 | --- | --- | --- | --- |
-| ADR-001 | [0001-core-runtime-language.md](0001-core-runtime-language.md) | Core Runtime Language | **PROPOSED** |
+| ADR-001 | [0001-core-runtime-language.md](0001-core-runtime-language.md) | Core Runtime Language | **FROZEN** |
 | ADR-002 | — | OSS License | OPEN |
 | ADR-003 | — | Dependency / Third-Party License Policy | OPEN |
 | ADR-004 | — | Core Source-of-Truth Boundaries | OPEN |
