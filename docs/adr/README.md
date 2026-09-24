@@ -2,7 +2,7 @@
 
 This directory holds Architecture Decision Records (ADRs) for TX4.
 
-ADR-001 through ADR-005 are **FROZEN**. No other ADRs have been accepted or frozen yet.
+ADR-001 through ADR-005 are **FROZEN**. ADR-006 is **PROPOSED**. No other ADRs have been accepted or frozen yet.
 
 ## ADR index
 
@@ -13,7 +13,7 @@ ADR-001 through ADR-005 are **FROZEN**. No other ADRs have been accepted or froz
 | ADR-003 | [0003-dependency-third-party-license-policy.md](0003-dependency-third-party-license-policy.md) | Dependency / Third-Party License Policy | **FROZEN** |
 | ADR-004 | [0004-core-source-of-truth-boundaries.md](0004-core-source-of-truth-boundaries.md) | Core Source-of-Truth Boundaries | **FROZEN** |
 | ADR-005 | [0005-api-versioning-strategy.md](0005-api-versioning-strategy.md) | API Versioning Strategy | **FROZEN** |
-| ADR-006 | — | Monetary Representation | OPEN |
+| ADR-006 | [0006-monetary-representation.md](0006-monetary-representation.md) | Monetary Representation | **PROPOSED** |
 | ADR-007 | — | Transaction Lifecycle | OPEN |
 | ADR-008 | — | Managed Cloud / OSS Boundary | OPEN |
 
