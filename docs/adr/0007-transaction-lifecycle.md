@@ -127,8 +127,8 @@ Rationale:
 
 * **Entry:** transaction opened for payment / awaiting payment-attempt resolution.
 * **Predecessors:** `CREATED`.
-* **Successors:** `PAID`, `CANCELLED`, `EXPIRED`, `FAILED`.
-* **Retryable:** payment **operations** may retry while remaining `PENDING` when outcome disposition is timeout/unknown/retryable (see §7–§8). Primary state does not flip to `FAILED` solely due to timeout.
+* **Successors:** `PAID`, `CANCELLED`, `EXPIRED`, `FAILED` (only under §7.3 Terminal Failure Decision — not automatic from operation `KNOWN_FAILURE`).
+* **Retryable:** payment **operations** may retry while remaining `PENDING` when outcome disposition is timeout/unknown/retryable or operation-level `KNOWN_FAILURE` (§7–§8). Primary state does not flip to `FAILED` solely due to timeout or a single operation failure.
 * **Externally observable:** yes.
 * **Financial effects:** payment attempts may be in flight; authoritative payment success is not assumed until transition to `PAID`.
 * **Recovery:** remain `PENDING` with accurate disposition; never fabricate provider failure from timeout.
@@ -186,7 +186,7 @@ Rationale:
 
 #### FAILED
 
-* **Entry:** durable **terminal business failure** of primary progression (not mere timeout).
+* **Entry:** durable **terminal business failure** of primary progression under §7.3 (from `PENDING`) or matrix-allowed post-pay failure (not mere timeout / not automatic operation `KNOWN_FAILURE`).
 * **Predecessors:** `PENDING`, `PAID` (conditional), `PROCESSING`.
 * **Successors:** none (primary lifecycle).
 * **Terminal:** yes.
@@ -221,11 +221,34 @@ Rows = from; columns = to.
 
 ### Conditional predicates
 
-**C1 — `PAID` → `CANCELLED`:** allowed only when an explicit cancel-after-payment decision is recorded for this transaction **and** any required compensating financial obligation is represented as explicit refund/adjustment intent/records (refund architecture OPEN). Cancellation still does **not** itself move money.
+**C1 — `PAID` → `CANCELLED`:** allowed only when an explicit cancel-after-payment decision is recorded for this transaction **and** the compensating-obligation rule in §6.1 is satisfied. Cancellation still does **not** itself execute a refund or move money.
 
-**C2 — `PAID` → `FAILED`:** allowed only for a documented terminal business inability to proceed after payment acceptance (not timeout). Typically requires compensating financial records; must not silently drop paid funds from history.
+**C2 — `PAID` → `FAILED`:** allowed only for a documented terminal business inability to proceed after payment acceptance (not timeout) **and** the compensating-obligation rule in §6.1 is satisfied. Must not silently drop paid funds from history.
 
-**C3 — `PROCESSING` → `CANCELLED`:** allowed only under explicit cancel-during-processing rules; compensating records as required; must not imply silent refund.
+**C3 — `PROCESSING` → `CANCELLED`:** allowed only under an explicit cancel-during-processing decision **and** the compensating-obligation rule in §6.1 is satisfied. Must not imply silent refund execution.
+
+### 6.1 Compensating-obligation intent (normative for C1/C2/C3)
+
+**Trigger:** Any primary transition that leaves `PAID` or `PROCESSING` for `CANCELLED` or `FAILED` (C1, C2, C3, and `PROCESSING` → `FAILED`) occurs **after funds/value acceptance has already been established** in primary state `PAID` (or while still post-acceptance in `PROCESSING`).
+
+For every such transition, TX4 MUST durably record a **compensating-obligation intent** as part of the authoritative transition semantics, before or atomically with the primary-state change (implementation mechanism OPEN), such that the transition cannot imply that the accepted financial consequence simply disappeared.
+
+Minimum intent contents (conceptual; schema OPEN):
+
+* transaction identity
+* logical transition / operation identity (idempotent association)
+* previous primary state and resulting primary state
+* reason/category for the compensating need
+* monetary amount + currency when known, using ADR-006 representation (or an explicit “amount to be determined by later refund rules” marker that remains auditable)
+* intent status distinct from refund execution (for example `INTENT_RECORDED`)
+
+Rules:
+
+1. **Cancel ≠ refund.** Recording intent does not execute a refund.
+2. **Failed ≠ refund.** Same boundary.
+3. Intent must be auditable and idempotently tied to the transition identity (§8).
+4. Later refund/adjustment **execution** remains OPEN architecture; historical primary state is not rewritten solely to represent compensation (§11, §15).
+5. If compensating intent cannot be durably recorded, the primary transition MUST fail closed (do not apply C1/C2/C3 / `PROCESSING`→`FAILED`).
 
 ### Explicitly forbidden examples (normative)
 
@@ -257,13 +280,55 @@ For external payment (and similar) operations, TX4 MUST record an **outcome disp
 1. **`TIMEOUT ≠ FAILED`.** Timeout must not by itself transition the transaction to `FAILED`.
 2. **`UNKNOWN ≠ FAILED`.**
 3. While disposition is `TIMEOUT` / `UNKNOWN` / `RECONCILIATION_REQUIRED`, primary state typically remains `PENDING` (or stays where it was if already past payment), and recovery/reconciliation proceeds per ADR-004.
-4. Transition `PENDING` → `PAID` requires disposition path equivalent to accepted `KNOWN_SUCCESS` under TX4 evidence rules.
-5. Transition `PENDING` → `FAILED` requires accepted terminal **business/known-failure** semantics — not timeout.
-6. Exactly-once external execution is **not** assumed (ADR-004).
+4. Transition `PENDING` → `PAID` requires disposition path equivalent to accepted `KNOWN_SUCCESS` under TX4 evidence rules (including when reconciliation later promotes an uncertain operation to accepted `KNOWN_SUCCESS` while still `PENDING`).
+5. Exactly-once external execution is **not** assumed (ADR-004).
 
-### 7.3 Representation boundary
+### 7.3 Operation-level `KNOWN_FAILURE` vs transaction `FAILED`
 
-Outcome disposition may be stored as operation/payment attempt metadata rather than as a ninth primary transaction state. That is intentional: uncertainty is about **external operations**, while primary state is about **TX4 transaction progression**.
+#### Operation-level `KNOWN_FAILURE`
+
+A payment (or similar) **operation** may record disposition `KNOWN_FAILURE` while the transaction remains **`PENDING`** when all of the following hold:
+
+1. the failure is attributable to that attempted operation (not a fabricated whole-transaction conclusion from timeout/unknown), and
+2. the failure does **not** by itself establish that the transaction’s primary commercial progression is terminally finished, and
+3. another permitted payment operation, explicit terminal decision, cancel, or expiration remains possible under domain policy.
+
+Therefore:
+
+```text
+operation KNOWN_FAILURE
+        ≠
+automatic PENDING → FAILED
+```
+
+Retryable payment declines / known provider-side operation failures are modeled as operation dispositions + optional new attempts while remaining `PENDING`, not as automatic primary terminalization.
+
+#### Transaction-level `PENDING` → `FAILED`
+
+`PENDING` → `FAILED` is **ALLOWED only when** a durable **Terminal Failure Decision** is recorded for the transaction, with a reason category in:
+
+| Reason category | Meaning |
+| --- | --- |
+| `BUSINESS_REJECTED_TERMINAL` | Explicit domain/business rejection that the transaction must not proceed further (not a single retryable operation failure) |
+| `ATTEMPT_BUDGET_EXHAUSTED` | A configured maximum payment-attempt budget `M` (`M ≥ 1`) is set for the transaction (or its type/policy), and the count of completed payment attempts that ended in `KNOWN_FAILURE` (without intervening `KNOWN_SUCCESS`) has reached `M` |
+| `DOMAIN_ABANDONED_TERMINAL` | Explicit abandonment decision that ends primary progression without using `CANCELLED`/`EXPIRED` |
+
+`PENDING` → `FAILED` is **FORBIDDEN** when the only evidence is a single (or non-budget-exhausting) operation `KNOWN_FAILURE`, `TIMEOUT`, or `UNKNOWN`.
+
+#### No indefinite `PENDING` solely from operation failures
+
+A conforming system MUST ensure every `PENDING` transaction has at least one defined exit other than “wait forever on repeated operation failures”:
+
+* an expiration rule enabling `PENDING` → `EXPIRED`, and/or
+* cancel enabling `PENDING` → `CANCELLED`, and/or
+* a configured attempt budget enabling `ATTEMPT_BUDGET_EXHAUSTED`, and/or
+* an explicit terminal-failure / abandonment decision path
+
+Exact default policy values (which exits are enabled, numeric `M`) remain domain/configuration OPEN, but “leave forever in `PENDING` because operations keep returning `KNOWN_FAILURE` with no exit path” is **non-conforming**.
+
+### 7.4 Representation boundary
+
+Outcome disposition may be stored as operation/payment attempt metadata rather than as a ninth primary transaction state. That is intentional: uncertainty and operation failure are about **external operations**, while primary state is about **TX4 transaction progression**.
 
 ---
 
@@ -302,19 +367,67 @@ Exact API header names remain OPEN (ADR-004).
 
 ## 9. Concurrency
 
-Concurrent transition attempts on one transaction MUST yield a deterministic durable outcome.
+Concurrent transition attempts on one transaction MUST yield a deterministic durable outcome that is **independent of worker timing, thread scheduling, network arrival order, database product, queue product, lock product, Rust runtime behavior, and provider-specific racing**.
 
-Required conceptual rule:
+### 9.1 Already-authoritative state wins
 
-1. At most one primary-state-changing transition becomes durable “winner” for a conflict set.
-2. Losers are rejected or become idempotent no-ops if they duplicate the winner.
-3. Examples:
-   * two workers apply `PENDING` → `PAID` with same logical payment success → one apply, one no-op
-   * cancel vs complete racing → exactly one allowed edge wins per matrix; the other is rejected
-   * provider callback and recovery racing → same idempotency/conflict rules; do not fabricate certainty
-   * retry after terminal → no-op or reject; must not leave terminal primary state
+If a primary transition is **already durably committed**, later competing operations are **not** concurrent winners:
 
-**Non-decision:** database locks, optimistic versioning, queues, and workflow engines remain OPEN. Implementations must satisfy the deterministic outcome invariant.
+* duplicate of the committed transition → idempotent no-op (§8)
+* different transition targeting a now-invalid source state → reject / stale (§8)
+* must not reopen terminal states (§6, §11)
+
+### 9.2 Concurrent conflict set (before commitment)
+
+When two or more **distinct eligible** primary transitions compete for the same transaction **before** any of them is durably authoritative, form the conflict set of candidates that are matrix-allowed (including conditionals whose predicates are satisfied at evaluation time).
+
+Exactly one candidate becomes the durable winner. All others MUST be rejected (not partially applied).
+
+### 9.3 Normative precedence (total order)
+
+Assign each candidate a **precedence class** by **target primary state** of the transition:
+
+| Precedence (higher number wins) | Target state | Rationale |
+| --- | ---: | --- |
+| 60 | `PAID` | Accepted payment success is a fund/value-acceptance fact; must not lose a race to abandon paths when `KNOWN_SUCCESS` evidence makes `→PAID` eligible |
+| 50 | `COMPLETED` | Established fulfillment/completion of primary commercial intent outranks abort paths from `PROCESSING` when completion is eligible |
+| 40 | `PROCESSING` | Progress into fulfillment outranks abandon-from-`PAID` only when both are concurrently eligible (rare; usually sequential) |
+| 30 | `FAILED` | Explicit terminal business failure outranks cancel/expire when concurrently eligible |
+| 20 | `CANCELLED` | Intentional cancel outranks mere expiration |
+| 10 | `EXPIRED` | Time-window end is the weakest abandon path in a conflict set |
+| 0 | `PENDING` | Opening progression (from `CREATED`) is lowest among listed targets |
+
+**Why not “success always beats cancel” as a slogan:** precedence is derived from **which fact is being established**. Fund-acceptance (`PAID`) and fulfillment-completion (`COMPLETED`) outrank abort transitions because dropping those facts in a race would erase stronger established outcomes. Abort transitions still win when they are the only eligible candidates, or when a higher-precedence candidate is not eligible.
+
+### 9.4 Deterministic tie-break
+
+If two candidates share the same precedence class (same target state) or otherwise tie on precedence:
+
+1. Compare durable logical **operation identity** strings (§8.2) using **lexicographically ascending** byte/code-point order.
+2. The **smaller** operation identity wins.
+3. If identities are equal, they are the same logical transition → idempotent single apply (§8).
+
+This tie-break is language-independent and must not use wall-clock arrival order.
+
+### 9.5 Required covered races
+
+The rule above yields a single prescribed winner for at least:
+
+| Race | Winner if both eligible |
+| --- | --- |
+| `PROCESSING`→`COMPLETED` vs `PROCESSING`→`CANCELLED` | `COMPLETED` |
+| `PENDING`→`PAID` vs `PENDING`→`EXPIRED` | `PAID` |
+| `PENDING`→`PAID` vs `PENDING`→`CANCELLED` | `PAID` |
+| `PROCESSING`→`COMPLETED` vs `PROCESSING`→`FAILED` | `COMPLETED` |
+| `PENDING`→`FAILED` vs `PENDING`→`CANCELLED` | `FAILED` |
+| `PENDING`→`CANCELLED` vs `PENDING`→`EXPIRED` | `CANCELLED` |
+| Any other distinct eligible pair from the same predecessor | higher precedence class, else §9.4 |
+
+Same logical transition delivered twice: one apply, one no-op (§8) — not a §9.3 race.
+
+### 9.6 Non-decision
+
+Database locks, optimistic versioning, queues, CAS, actors, and workflow engines remain **OPEN**. Implementations may use any mechanism that realizes §9.1–§9.5.
 
 ---
 
@@ -364,8 +477,8 @@ Reconciliation may update dispositions, evidence, and reconciliation records. It
 | Situation | Rule |
 | --- | --- |
 | Before payment (`CREATED`/`PENDING`) | `→ CANCELLED` allowed; no refund implied |
-| After payment (`PAID`) | `→ CANCELLED` only under **C1**; refund not implied |
-| During processing | `→ CANCELLED` only under **C3**; refund not implied |
+| After payment (`PAID`) | `→ CANCELLED` only under **C1** + §6.1 compensating-obligation intent; refund execution not implied |
+| During processing | `→ CANCELLED` only under **C3** + §6.1; refund execution not implied |
 | After completion | Forbidden as primary transition; use refund/adjustment records if funds must return |
 | Under external uncertainty | Do not cancel solely because of timeout; resolve disposition/reconcile first unless an explicit domain cancel rule applies independently of provider timeout |
 
@@ -389,7 +502,8 @@ Reconciliation may update dispositions, evidence, and reconciliation records. It
 | --- | --- |
 | Transient operational failure / retryable processing | Remain in `PENDING` or `PROCESSING`; retry operations idempotently |
 | External uncertainty (timeout/unknown) | Remain; disposition updated; not auto-`FAILED` |
-| Terminal business failure | `→ FAILED` when allowed by matrix |
+| Operation-level `KNOWN_FAILURE` | Remain in `PENDING` (for payment attempts) per §7.3; do **not** auto-transition `PENDING`→`FAILED` |
+| Terminal business failure | `→ FAILED` only when §7.3 Terminal Failure Decision (or matrix-allowed post-pay failure with §6.1) applies |
 | Retry after `FAILED` | New **transaction** identity (or future explicitly authorized supersession ADR) — not a primary edge out of `FAILED` |
 
 `FAILED` is **terminal** for this transaction’s primary lifecycle.
