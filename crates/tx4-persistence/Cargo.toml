@@ -4,8 +4,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "TX4 persistence adapters (PostgreSQL/SQLx — later phases)"
+description = "TX4 persistence adapters (PostgreSQL/SQLx)"
 
 [dependencies]
+sqlx = { workspace = true }
+tokio = { workspace = true }
 tx4-application = { workspace = true }
+tx4-config = { workspace = true }
 tx4-domain = { workspace = true }
+
+[dev-dependencies]
+sqlx = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

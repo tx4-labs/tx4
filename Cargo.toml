@@ -31,3 +31,5 @@ tx4-observability = { path = "crates/tx4-observability" }
 tx4-config = { path = "crates/tx4-config" }
 serde = { version = "1.0.219", default-features = false, features = ["std", "derive"] }
 serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "postgres", "migrate"] }
+tokio = { version = "1.47.1", default-features = false, features = ["rt-multi-thread", "macros"] }

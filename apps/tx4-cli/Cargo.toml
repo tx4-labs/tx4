@@ -4,11 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "TX4 CLI application (bootstrap only in Phase-1A)"
+description = "TX4 CLI application"
 
 [[bin]]
 name = "tx4-cli"
 path = "src/main.rs"
 
 [dependencies]
+tokio = { workspace = true }
 tx4-config = { workspace = true }
+tx4-persistence = { workspace = true }

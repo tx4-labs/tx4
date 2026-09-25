@@ -1,8 +1,21 @@
-//! TX4 persistence adapter boundary.
+//! TX4 persistence adapters (PostgreSQL / SQLx).
 //!
-//! Phase-1A: crate boundary only. No PostgreSQL, migrations, or repositories.
+//! Phase-1C: connection pool, migration runner, and connectivity health.
+//! No business repositories or business schema.
 
 #![forbid(unsafe_code)]
+
+mod error;
+mod health;
+mod migrate;
+mod pool;
+
+pub use error::PersistenceError;
+pub use health::check_connectivity;
+pub use migrate::run_migrations;
+pub use pool::{close_pool, connect_pool};
+
+pub use sqlx::PgPool;
 
 pub use tx4_application;
 pub use tx4_domain;
