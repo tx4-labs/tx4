@@ -2,7 +2,7 @@
 
 This directory holds Architecture Decision Records (ADRs) for TX4.
 
-ADR-001 through ADR-006 are **FROZEN**. No other ADRs have been accepted or frozen yet.
+ADR-001 through ADR-006 are **FROZEN**. ADR-007 is **PROPOSED**. No other ADRs have been accepted or frozen yet.
 
 ## ADR index
 
@@ -14,7 +14,7 @@ ADR-001 through ADR-006 are **FROZEN**. No other ADRs have been accepted or froz
 | ADR-004 | [0004-core-source-of-truth-boundaries.md](0004-core-source-of-truth-boundaries.md) | Core Source-of-Truth Boundaries | **FROZEN** |
 | ADR-005 | [0005-api-versioning-strategy.md](0005-api-versioning-strategy.md) | API Versioning Strategy | **FROZEN** |
 | ADR-006 | [0006-monetary-representation.md](0006-monetary-representation.md) | Monetary Representation | **FROZEN** |
-| ADR-007 | — | Transaction Lifecycle | OPEN |
+| ADR-007 | [0007-transaction-lifecycle.md](0007-transaction-lifecycle.md) | Transaction Lifecycle | **PROPOSED** |
 | ADR-008 | — | Managed Cloud / OSS Boundary | OPEN |
 
 ## Process
