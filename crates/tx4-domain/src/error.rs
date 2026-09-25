@@ -15,6 +15,8 @@ pub enum DomainError {
     InvalidAllocation,
     InvalidVersion,
     InvalidRounding,
+    /// Attempt budget must be absent or ≥ 1 (ADR-007 §7.3).
+    InvalidAttemptBudget,
     /// Matrix cell is forbidden (ADR-007 §6).
     ForbiddenTransition,
     /// Conditional predicate (C1/C2/C3) not satisfied.
@@ -48,6 +50,7 @@ impl fmt::Display for DomainError {
             Self::InvalidAllocation => write!(f, "invalid money allocation"),
             Self::InvalidVersion => write!(f, "invalid version"),
             Self::InvalidRounding => write!(f, "invalid rounding inputs"),
+            Self::InvalidAttemptBudget => write!(f, "invalid attempt budget"),
             Self::ForbiddenTransition => write!(f, "forbidden lifecycle transition"),
             Self::ConditionalPredicateUnsatisfied => {
                 write!(f, "lifecycle conditional predicate unsatisfied")

@@ -12,6 +12,7 @@ mod identity;
 mod lifecycle;
 mod money;
 mod rounding;
+mod transaction;
 mod version;
 
 pub use allocation::allocate;
@@ -25,6 +26,7 @@ pub use lifecycle::{
 };
 pub use money::Money;
 pub use rounding::round_half_even_rational;
+pub use transaction::Transaction;
 pub use version::Version;
 
 /// Marker that the domain crate is linked and compilable.

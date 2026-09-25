@@ -2,7 +2,7 @@
 //!
 //! Phase-1C: connection pool, migration runner, and connectivity health.
 //! Phase-2A: transaction aggregate schema foundation (`tx4_infra.transactions`).
-//! No business repositories, idempotency, outbox, or PaymentAttempt logic yet.
+//! Phase-2B: durable transaction repository + `SELECT … FOR UPDATE` concurrency.
 
 #![forbid(unsafe_code)]
 
@@ -10,11 +10,13 @@ mod error;
 mod health;
 mod migrate;
 mod pool;
+mod transaction_repo;
 
 pub use error::PersistenceError;
 pub use health::{check_connectivity, check_schema_foundation};
 pub use migrate::run_migrations;
 pub use pool::{close_pool, connect_pool};
+pub use transaction_repo::PgTransactionRepository;
 
 pub use sqlx::PgPool;
 

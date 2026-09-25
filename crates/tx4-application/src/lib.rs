@@ -1,16 +1,17 @@
 //! TX4 application / use-case boundary.
 //!
 //! Ports for infrastructure adapters are defined here (frozen architecture).
-//! Phase-1D: error vocabulary, correlation context, and structural command/query/port
-//! namespaces — no business use cases.
+//! Phase-2B: durable `TransactionRepository` port.
 
 #![forbid(unsafe_code)]
 
 mod context;
 mod error;
+pub mod ports;
 
 pub use context::RequestContext;
 pub use error::ApplicationError;
+pub use ports::TransactionRepository;
 pub use tx4_domain;
 
 /// Marker that the application crate is linked and compilable.
@@ -21,20 +22,8 @@ pub fn crate_name() -> &'static str {
 /// Future application commands (unauthorized business commands must not be added here yet).
 pub mod commands {}
 
-/// Future application queries (no business queries in Phase-1D).
+/// Future application queries (no business queries beyond repository load yet).
 pub mod queries {}
-
-/// Infrastructure ports defined at the application boundary (IA §5.2).
-///
-/// Concrete port traits and adapters are authorized in later phases.
-/// Payment provider ports must not perform I/O here.
-pub mod ports {
-    /// Future payment-provider port namespace (no Xendit/DOKU/Midtrans in Phase-1D).
-    pub mod payment {}
-
-    /// Future persistence port namespace (no business repositories in Phase-1D).
-    pub mod persistence {}
-}
 
 #[cfg(test)]
 mod tests {
@@ -55,6 +44,7 @@ mod tests {
     fn error_variants_cover_foundation_vocabulary() {
         let cases = [
             ApplicationError::validation("bad"),
+            ApplicationError::not_found("missing"),
             ApplicationError::business_rejection("rule"),
             ApplicationError::conflict("stale"),
             ApplicationError::idempotency_conflict("dup"),
@@ -63,7 +53,7 @@ mod tests {
             ApplicationError::permanent_internal("bug"),
             ApplicationError::timeout("upstream timed out"),
         ];
-        assert_eq!(cases.len(), 8);
+        assert_eq!(cases.len(), 9);
     }
 
     #[test]

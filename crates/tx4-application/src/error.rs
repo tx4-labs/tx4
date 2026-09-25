@@ -11,6 +11,10 @@ pub enum ApplicationError {
     Validation {
         message: String,
     },
+    /// Requested durable entity was not found under the given ownership scope.
+    NotFound {
+        message: String,
+    },
     BusinessRejection {
         message: String,
     },
@@ -39,6 +43,12 @@ pub enum ApplicationError {
 impl ApplicationError {
     pub fn validation(message: impl Into<String>) -> Self {
         Self::Validation {
+            message: message.into(),
+        }
+    }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::NotFound {
             message: message.into(),
         }
     }
@@ -116,6 +126,7 @@ impl ApplicationError {
     pub fn message(&self) -> &str {
         match self {
             Self::Validation { message }
+            | Self::NotFound { message }
             | Self::BusinessRejection { message }
             | Self::Conflict { message }
             | Self::IdempotencyConflict { message }
@@ -131,6 +142,7 @@ impl fmt::Display for ApplicationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Validation { message } => write!(f, "validation error: {message}"),
+            Self::NotFound { message } => write!(f, "not found: {message}"),
             Self::BusinessRejection { message } => write!(f, "business rejection: {message}"),
             Self::Conflict { message } => write!(f, "conflict: {message}"),
             Self::IdempotencyConflict { message } => {

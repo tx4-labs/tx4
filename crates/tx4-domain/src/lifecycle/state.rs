@@ -71,6 +71,23 @@ impl fmt::Display for TransactionState {
     }
 }
 
+impl TransactionState {
+    /// Parse ADR-007 / Display canonical strings. Fail closed on undocumented values.
+    pub fn parse_str(raw: &str) -> Result<Self, crate::DomainError> {
+        match raw {
+            "CREATED" => Ok(Self::Created),
+            "PENDING" => Ok(Self::Pending),
+            "PAID" => Ok(Self::Paid),
+            "PROCESSING" => Ok(Self::Processing),
+            "COMPLETED" => Ok(Self::Completed),
+            "CANCELLED" => Ok(Self::Cancelled),
+            "EXPIRED" => Ok(Self::Expired),
+            "FAILED" => Ok(Self::Failed),
+            _ => Err(crate::DomainError::ForbiddenTransition),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
