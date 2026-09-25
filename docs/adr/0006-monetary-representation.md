@@ -4,8 +4,9 @@
 | --- | --- |
 | ADR | **006** |
 | Title | Monetary Representation |
-| Status | **PROPOSED** |
+| Status | **FROZEN** |
 | Date | 2026-09-24 |
+| Frozen | 2026-09-25 (FREEZE-009; basis AUDIT-014 PASS) |
 | Decision scope | Canonical TX4 monetary value model, exactness, currency identity, precision, rounding, allocation, overflow, serialization, comparison, and FX boundary |
 | Related Master Spec | §9 Financial Correctness; §10 Fees; §11 Billing & Usage; §13 Ledger; §14 Settlement; §15 Reconciliation; §16 Idempotency; §19 API; §31 Production-Grade; §36 Current Status |
 | Depends on | ADR-001 (Rust) — FROZEN; ADR-002 (Apache-2.0) — FROZEN; ADR-003 — FROZEN; ADR-004 (SoT / durability) — FROZEN; ADR-005 (API versioning) — FROZEN |
@@ -15,9 +16,9 @@
 
 ## 1. Status
 
-**PROPOSED** — not FROZEN.
+**FROZEN**
 
-Freeze requires independent audit and an explicit freeze task.
+Freeze path completed: TASK-009 → AUDIT-012 → TASK-012R → AUDIT-014 → FREEZE-009.
 
 This ADR defines TX4’s **internal technical monetary representation and arithmetic rules**. It does **not** establish statutory accounting, tax compliance, regulated financial accounting, legal-tender treatment, or banking compliance.
 
