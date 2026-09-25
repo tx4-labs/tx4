@@ -4,6 +4,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "TX4 configuration loading boundary (later phases)"
+description = "TX4 configuration loading and validation"
 
 [dependencies]

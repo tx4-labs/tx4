@@ -29,3 +29,5 @@ tx4-adapters-payment = { path = "crates/tx4-adapters-payment" }
 tx4-worker = { path = "crates/tx4-worker" }
 tx4-observability = { path = "crates/tx4-observability" }
 tx4-config = { path = "crates/tx4-config" }
+serde = { version = "1.0.219", default-features = false, features = ["std", "derive"] }
+serde_json = { version = "1.0.140", default-features = false, features = ["std"] }

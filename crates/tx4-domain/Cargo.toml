@@ -7,3 +7,7 @@ publish.workspace = true
 description = "TX4 domain primitives and invariants (innermost crate)"
 
 [dependencies]
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
