@@ -4,8 +4,9 @@
 | --- | --- |
 | ADR | **007** |
 | Title | Transaction Lifecycle |
-| Status | **PROPOSED** |
+| Status | **FROZEN** |
 | Date | 2026-09-25 |
+| Frozen | 2026-09-25 (FREEZE-010; basis AUDIT-017 PASS) |
 | Decision scope | Canonical TX4 transaction lifecycle state machine: states, transitions, uncertainty, idempotency, concurrency, crash recovery, terminal semantics, cancellation, expiration, failure/retry, and refund/adjustment boundary |
 | Related Master Spec | §7 Transaction Model; §8 Payment Boundary; §13 Ledger; §14 Settlement; §15 Reconciliation; §16 Idempotency; §17 Webhooks; §19 API; §31 Production-Grade; §36 Current Status |
 | Depends on | ADR-001 (Rust) — FROZEN; ADR-002 — FROZEN; ADR-003 — FROZEN; ADR-004 (SoT / durability) — FROZEN; ADR-005 (API versioning) — FROZEN; ADR-006 (monetary representation) — FROZEN |
@@ -15,9 +16,9 @@
 
 ## 1. Status
 
-**PROPOSED** — not FROZEN.
+**FROZEN**
 
-Freeze requires independent audit and an explicit freeze task.
+Freeze path completed: TASK-016 → AUDIT-016 → TASK-016R → AUDIT-017 → FREEZE-010.
 
 This ADR defines the **canonical TX4 transaction lifecycle** as a durable, deterministic, auditable state machine. It does **not** select persistence technology, payment providers, queues, locking strategies, workflow engines, HTTP frameworks, or SDK languages.
 
