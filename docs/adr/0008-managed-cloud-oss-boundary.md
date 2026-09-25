@@ -4,8 +4,9 @@
 | --- | --- |
 | ADR | **008** |
 | Title | Managed Cloud / OSS Boundary |
-| Status | **PROPOSED** |
+| Status | **FROZEN** |
 | Date | 2026-09-25 |
+| Frozen | 2026-09-25 (FREEZE-011; basis AUDIT-019 PASS) |
 | Decision scope | Boundary between TX4 Open Source transaction infrastructure and TX4 Managed Cloud (hosted proprietary experience / operations) |
 | Related Master Spec | §3 OSS Boundary; §4 Managed Cloud Boundary; §5 Core Design Principle; §11 Billing & Usage; §19 API; §20 SDK; §23 Managed Cloud; §24 Dogfood Applications; §27 OSS Governance; §36 Current Status |
 | Depends on | ADR-001 (Rust) — FROZEN; ADR-002 (Apache-2.0) — FROZEN; ADR-003 — FROZEN; ADR-004 (SoT / durability) — FROZEN; ADR-005 (API versioning) — FROZEN; ADR-006 (monetary representation) — FROZEN; ADR-007 (transaction lifecycle) — FROZEN |
@@ -15,9 +16,9 @@
 
 ## 1. Status
 
-**PROPOSED** — not FROZEN.
+**FROZEN**
 
-Freeze requires independent audit and an explicit freeze task.
+Freeze path completed: TASK-017 → AUDIT-019 → FREEZE-011.
 
 This ADR defines the **product and distribution boundary** between TX4 OSS and TX4 Managed Cloud. It does **not** select cloud providers, databases, frameworks, payment providers, deployment platforms, pricing packages, or implementation topologies.
 
