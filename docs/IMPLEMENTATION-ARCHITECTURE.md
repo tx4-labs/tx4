@@ -3,13 +3,14 @@
 | Field | Value |
 | --- | --- |
 | Document | **IMPLEMENTATION-ARCHITECTURE** |
-| Status | **PROPOSED** (remediated TASK-018RR; awaiting AUDIT-023) |
+| Status | **FROZEN** |
 | Date | 2026-09-25 |
-| Authorizing task | TASK-018; TASK-018R; TASK-018RR |
+| Frozen | 2026-09-25 (FREEZE-012; basis AUDIT-023 PASS; audited HEAD `230144f813a3bd8c69880ca3e4fc0035ea7ede0b`) |
+| Authorizing path | TASK-018 → AUDIT-021 → TASK-018R → AUDIT-022 → TASK-018RR → AUDIT-023 → FREEZE-012 |
 | Baseline (TASK-018) | `ec3b80dafd8328b363a89bbb5b7e4b9ea83508a9` |
-| Remediation baseline | `815fa64cd74669fddd136ae5e60b9e21683c7d77` (AUDIT-022) |
-| Authorization basis | AUDIT-020 PASS; Architecture Decision Phase COMPLETE |
-| Scope | Implementation architecture specification only — **not** implementation authorization |
+| Audited content HEAD | `230144f813a3bd8c69880ca3e4fc0035ea7ede0b` |
+| Authorization basis | AUDIT-020 PASS; Architecture Decision Phase COMPLETE; AUDIT-023 PASS / FREEZE_READY |
+| Scope | Frozen implementation architecture — **not** implementation authorization |
 
 ---
 
@@ -49,20 +50,34 @@ TX4 is **not** a payment processor, accounting ERP, bank, regulated FI, billing-
 
 | Label | Meaning |
 | --- | --- |
-| **IA-FROZEN** | Selected by this specification for initial production implementation (subject to AUDIT-021) |
+| **FROZEN** (document) | This specification is frozen by FREEZE-012; implementation must treat it as authoritative |
+| **IA-FROZEN** | Selected by this specification for initial production implementation |
 | **OPEN** | Explicitly deferred; must not be silently assumed in code |
 | **CONCEPTUAL** | Domain concept without technology freeze |
 
-### 0.4 What this document authorizes
+### 0.4 What this frozen document authorizes
 
-- A concrete, production-grade **implementation architecture plan**
-- Technology selections required to start implementation **after** AUDIT-021
+- Authoritative **implementation architecture** for future authorized implementation tasks
+- Technology selections and durability/idempotency/payment/outbox protocols frozen herein
 
 ### 0.5 What this document does **not** authorize
 
-- Writing Rust code, crates, migrations, APIs, SDKs, Dockerfiles, Cloud, or dogfood apps
+- Writing Rust code, crates, migrations, APIs, SDKs, Dockerfiles, Cloud, or dogfood apps **by this freeze alone**
 - Modifying ADRs, Master Spec, Cursor rules, or CI
 - Selecting cloud vendors, pricing, or speculative distributed systems
+- Silently converting remaining **OPEN** decisions into frozen ones
+
+### 0.6 Freeze conflict rule
+
+```text
+IMPLEMENTATION
+      ↓
+CONFLICT WITH FROZEN ARCHITECTURE / ADR
+      ↓
+STOP → REPORT → SPEC/ADR CHANGE GATE
+```
+
+Never silent workaround or architecture drift.
 
 ---
 
@@ -1308,7 +1323,7 @@ Initial TX4 production OSS cut is architecture-complete only when evidence shows
 
 ## 33. OPEN vs IA-FROZEN Summary
 
-### IA-FROZEN by this specification (pending AUDIT-023)
+### IA-FROZEN by this specification (**document FROZEN** — FREEZE-012)
 
 - Tokio, Axum, PostgreSQL, SQLx, Serde, tracing+OTel-compatible, REST+OpenAPI, SQLx migrations, Docker packaging
 - Hybrid relational persistence with explicit **mutable operational** vs **append-only evidence/financial** taxonomy (not event sourcing)
@@ -1326,6 +1341,8 @@ Initial TX4 production OSS cut is architecture-complete only when evidence shows
 - **Ledger posting convention** (debit/credit vs signed) — OPEN until before Phase 5 (§14.3)
 - Arbitrary big-int money intermediates — out of initial scope
 
+Freeze does **not** convert remaining OPEN decisions into frozen ones.
+
 ---
 
 ## 34. Conflict Check vs Frozen ADRs
@@ -1341,21 +1358,19 @@ Initial TX4 production OSS cut is architecture-complete only when evidence shows
 | ADR-007 | Compatible — matrix/precedence/uncertainty implemented, not replaced |
 | ADR-008 | Compatible — OSS independent; Cloud separated |
 
-**ARCHITECTURE_CONFLICTS:** NONE identified at specification time.
+**ARCHITECTURE_CONFLICTS:** NONE identified at freeze time.
 
 ---
 
-## 35. Explicit Non-Actions
+## 35. Freeze Non-Actions
 
-This document does **not**:
+FREEZE-012 does **not**:
 
 - modify ADR-001…008 or Master Spec
 - add `src/`, `crates/`, migrations, or dependencies
-- authorize coding
+- authorize coding or Phase 1 implementation
 
-TASK-018RR remediates AUDIT-022 findings in this file only.
-
-Next gate: **AUDIT-023** (independent re-audit after TASK-018RR).
+Next gate: **IMPLEMENTATION-AUTHORIZATION** (explicit task required before code).
 
 ---
 
@@ -1366,3 +1381,4 @@ Next gate: **AUDIT-023** (independent re-audit after TASK-018RR).
 | 2026-09-25 | TASK-018 created PROPOSED implementation architecture |
 | 2026-09-25 | TASK-018R remediated AUDIT-021 findings (persistence taxonomy, idempotency/outbox leases, money intermediates, locks, PaymentAttempt, ops contract) |
 | 2026-09-25 | TASK-018RR remediated AUDIT-022 findings (SUBMITTED-before-I/O, outbox fencing, taxonomy, worktree integrity) |
+| 2026-09-25 | FREEZE-012 froze implementation architecture (basis AUDIT-023 PASS) |
