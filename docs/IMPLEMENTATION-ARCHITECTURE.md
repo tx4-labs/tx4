@@ -3,11 +3,11 @@
 | Field | Value |
 | --- | --- |
 | Document | **IMPLEMENTATION-ARCHITECTURE** |
-| Status | **PROPOSED** (remediated TASK-018R; awaiting AUDIT-022) |
+| Status | **PROPOSED** (remediated TASK-018RR; awaiting AUDIT-023) |
 | Date | 2026-09-25 |
-| Authorizing task | TASK-018; remediated by TASK-018R |
+| Authorizing task | TASK-018; TASK-018R; TASK-018RR |
 | Baseline (TASK-018) | `ec3b80dafd8328b363a89bbb5b7e4b9ea83508a9` |
-| Remediation baseline | `22f8172f014e1a2b689a467ced250eeea14f1535` (AUDIT-021) |
+| Remediation baseline | `815fa64cd74669fddd136ae5e60b9e21683c7d77` (AUDIT-022) |
 | Authorization basis | AUDIT-020 PASS; Architecture Decision Phase COMPLETE |
 | Scope | Implementation architecture specification only — **not** implementation authorization |
 
@@ -308,10 +308,11 @@ These rows are durable in PostgreSQL and **may be updated in place**. They MUST 
 | --- | --- | --- | --- |
 | Transaction current primary state (+ version) | **Mutable** | **Authoritative** current TX4 lifecycle state | Current aggregate state |
 | Idempotency reservation | **Mutable** | **Authoritative** for duplicate detection + stored API/command result | Lease, status, replay |
-| Outbox / job record | **Mutable** | **Authoritative** for async work scheduling only — **not** domain SoT | Claim, lease, retry, completion |
+| Outbox / job record | **Mutable** | **Authoritative** for async work scheduling only — **not** domain SoT | Claim, lease, fencing, retry, completion |
 | Worker lease / claim metadata (on outbox/job) | **Mutable** | Operational processing state | Prevent stuck work; enable reclaim |
 | PaymentAttempt current status / disposition fields | **Mutable** (status) | **Authoritative** TX4 view of that attempt’s progress; provider remains provider-side SoT | Bind provider I/O; uncertainty; reconcile |
 | Retry / processing counters on operational rows | **Mutable** | Operational | Backoff, attempt budgets at row level |
+| Materialized balances (if any) | **Mutable cache** | **Derived only** — rebuildable from ledger entries; **non-authoritative** | Performance; never second authority |
 
 #### B. Append-only evidence / financial records
 
@@ -324,7 +325,6 @@ These rows are **immutable after insert** (corrections = new rows). They are **n
 | Provider observations (raw + normalized) | **Append-only** | **Observed evidence** | Webhooks/polls as received |
 | Reconciliation discrepancy / resolution records | **Append-only** (new resolution rows) | **Authoritative** TX4 reconciliation decisions | Detect/resolve without fabricating certainty |
 | Compensating-obligation intent records | **Append-only** (intent row; later refund execution separate) | **Authoritative** intent evidence per ADR-007 §6.1 | Fail-closed post-pay exits |
-| Materialized balances (if any) | **Mutable cache** | **Derived only** — rebuildable from ledger entries | Performance; never second authority |
 
 Cloud control-plane state remains **separate** (ADR-008) and is not OSS domain DB authority.
 
@@ -526,13 +526,13 @@ For C1/C2/C3 and `PROCESSING→FAILED`, insert durable compensating-intent row *
 
 ```text
 WRONG: BEGIN; FOR UPDATE; call provider; COMMIT;
-RIGHT: durable PaymentAttempt + idempotency reservation (same DB authority)
-       → release DB locks / commit prepare phase as designed
-       → call provider (outside locks)
+RIGHT: durable PaymentAttempt PREPARED + idempotency reservation
+       → assign provider_idempotency_key; PREPARED → SUBMITTED; COMMIT (§12.4.1)
+       → call provider (outside locks; same attempt identity)
        → BEGIN; FOR UPDATE (lock order §8.4); apply evidence/transition; COMMIT;
 ```
 
-External calls happen **outside** database row locks. Uncertainty after timeout is recorded as disposition on the existing PaymentAttempt, not invented transaction `FAILED`.
+External calls happen **outside** database row locks and **only after** committed `SUBMITTED`. Uncertainty after timeout is recorded as disposition on the existing PaymentAttempt, not invented transaction `FAILED`.
 
 ### 8.3 Concurrent duplicate requests
 
@@ -616,9 +616,15 @@ Durable **idempotency reservation** rows in PostgreSQL (**mutable operational st
 
 5. **Crash reclaim.** When `status = IN_PROGRESS` and `lease_expires_at < now()`, a claimant MAY reclaim **only** by: (a) locking the reservation row, (b) verifying expiry, (c) setting new `lease_owner` / `lease_expires_at`, (d) **not** blindly re-running external side effects — see (7).
 
-6. **External side-effect protection.** Before provider I/O, a durable PaymentAttempt (or equivalent attempt) with stable identity MUST already exist (§12.4).
+6. **External side-effect protection (normative).** Before **any** provider I/O, a durable PaymentAttempt MUST already exist **and** its `PREPARED → SUBMITTED` transition MUST already be **committed** with a stable `provider_idempotency_key` (§12.4.1). Existence of `PREPARED` alone is **not** sufficient to call the provider.
 
-7. **Reclaim ≠ blind re-execution.** If provider I/O may already have occurred for the bound attempt, recovery MUST **reconcile/query** that attempt first; only then may a new external side effect be created under a **new** attempt identity if policy allows.
+7. **Reclaim predicate (normative).** On reclaim of an expired `IN_PROGRESS` reservation, the reclaiming executor MUST inspect the bound PaymentAttempt (when the command is payment-related).
+
+   - If attempt status is `SUBMITTED`, `UNKNOWN`, `SUCCEEDED`, or `FAILED`: MUST **reconcile/query** provider state for that **same** attempt identity first; MUST NOT initiate a **new** external payment side effect merely because the local request lease expired.
+   - If attempt status is `PREPARED` with **no** durable evidence of submission (`SUBMITTED` never committed): MAY proceed with first submission **only** via §12.4.1 (assign key → `SUBMITTED` commit → then I/O).
+   - **Lease expiry is not evidence that provider I/O did not occur.**
+   - Process crash is not evidence that the provider request did not happen.
+   - Forbidden crash-recovery strategy: `SUBMITTED` (or later) → create a new PaymentAttempt → blind provider call.
 
 8. **Completion.** On success, durably set `COMPLETED` with stored result in the same DB transaction as the business result being finalized (or immediately after under the same command’s commit boundary without releasing the reservation to another executor mid-finalize).
 
@@ -638,7 +644,7 @@ Durable **idempotency reservation** rows in PostgreSQL (**mutable operational st
 | Duplicate, `COMPLETED`, same fingerprint | Return stored result; no new financial effect |
 | Duplicate, active `IN_PROGRESS`, same fingerprint | Non-executing deterministic in-progress/conflict |
 | Same key, different fingerprint | Conflict; do not apply |
-| Expired `IN_PROGRESS` | Reclaim per §9.2(5–7); reconcile before new provider I/O |
+| Expired `IN_PROGRESS` | Reclaim per §9.2(5–7); apply PaymentAttempt reclaim predicate (§9.2(7) / §12.4.2) |
 
 ### 9.4 Retention
 
@@ -651,23 +657,37 @@ Idempotency reservation rows are retained for a configurable TTL (numeric defaul
 | Failure | Behavior |
 | --- | --- |
 | Process crash mid-request before commit | No durable transition; client retry with same idempotency key; expired `IN_PROGRESS` reclaim per §9 |
-| Crash after commit | Resume from durable state; idempotent no-op on retry |
+| Crash after `SUBMITTED` commit, before/during provider I/O | Attempt remains `SUBMITTED` (or later `UNKNOWN`); reclaim MUST reconcile — not blind new attempt (§12.4.3) |
+| Crash after commit of business result | Resume from durable state; idempotent no-op on retry |
 | DB transaction rollback | No partial authoritative write; safe retry |
-| Provider timeout | Mark existing PaymentAttempt uncertain (`UNKNOWN` / timeout disposition); **not** auto-`FAILED` transaction; schedule reconcile |
+| Provider timeout | Mark existing PaymentAttempt `UNKNOWN` / timeout disposition; **not** auto-`FAILED` transaction; schedule reconcile |
 | Webhook late / duplicate / out-of-order | Durable observation + idempotent apply against PaymentAttempt; ignore stale if state already advanced; never invent certainty |
 | Recovery of uncertain operation | Query provider / reconcile **existing** attempt; promote to success/failure only with evidence |
-| Worker crash after claim | Outbox lease expires; job reclaimable (§11); handlers must be idempotent |
-| Worker crash before ack | Same — lease reclaim; at-least-once |
+| Worker crash after claim | Outbox lease expires; job reclaimable with new `claim_epoch` (§11); handlers idempotent; stale worker fenced |
+| Worker crash before ack | Same — lease reclaim; at-least-once + fencing |
 | Outbox remains PENDING | Eligible when `next_attempt_at <= now` |
 | Reconciliation finds external success | Apply evidence to existing attempt/transaction per ADR-007; do not fabricate |
+
+### 10.1 PaymentAttempt crash matrix (IA-FROZEN / ARCHITECTURAL REQUIREMENT)
+
+| Durable attempt state before crash | Provider I/O possibility | Recovery |
+| --- | --- | --- |
+| `PREPARED`, before committed `SUBMITTED` | **No** provider I/O permitted yet | May proceed with **first** submission only via §12.4.1 |
+| `SUBMITTED` | **May** have occurred | Reconcile/query first; do not create a new attempt for blind retry |
+| `UNKNOWN` | **May** have occurred | Reconcile/query first |
+| `SUCCEEDED` | Already completed | Do not duplicate external effect; finalize idempotency from evidence |
+| `FAILED` | Follow provider/domain failure semantics | Do not blindly recreate external effect; new commercial attempt needs new identity when policy requires |
+
+A process crash does **not** prove provider failure. Lease expiry does **not** prove provider I/O did not occur.
 
 **Distinguish:**
 
 ```text
 DB transaction rollback  ≠  external provider uncertainty
+crash / lease expiry     ≠  provider did not execute
 ```
 
-No universal exactly-once claim (ADR-004 §9). Desired invariant: **exactly-once business effect** via durable identity + idempotency + reconciliation.
+No universal exactly-once claim (ADR-004 §9). Desired invariant: **exactly-once business effect** via durable identity + idempotency + reconciliation (at-least-once delivery + idempotent processing).
 
 ---
 
@@ -679,9 +699,9 @@ No universal exactly-once claim (ADR-004 §9). Desired invariant: **exactly-once
 | --- | --- |
 | **DECISION** | **Transactional outbox / job table + dedicated worker process** polling/claiming jobs in PostgreSQL (**mutable operational state**, §4.1.1A) |
 | **QUEUE/BROKER** | **Not required** for initial architecture |
-| **RATIONALE** | Async work (webhook delivery, provider status poll, reconciliation checks, expiration sweeps) must commit atomically with domain changes. A Postgres outbox preserves that atomicity without introducing Kafka/NATS operational surface or a second durability system. At-least-once worker delivery + idempotent handlers preserve correctness under duplicate/delay. |
+| **RATIONALE** | Async work (webhook delivery, provider status poll, reconciliation checks, expiration sweeps) must commit atomically with domain changes. A Postgres outbox preserves that atomicity without introducing Kafka/NATS operational surface or a second durability system. At-least-once worker delivery + idempotent handlers + **fencing** preserve correctness under duplicate/delay/stale workers. |
 | **ALTERNATIVES** | Kafka/NATS (defer until scale/ops justify); Redis queues (extra durability class); in-process only (fails crash recovery) |
-| **TRADE-OFFS** | Polling latency; requires lease reclaim (SKIP LOCKED alone is insufficient) |
+| **TRADE-OFFS** | Polling latency; requires lease reclaim **and** fencing (SKIP LOCKED alone is insufficient) |
 | **FROZEN_OR_OPEN** | **IA-FROZEN** (outbox+worker); external broker **OPEN** |
 
 ### 11.2 Job lifecycle (IA-FROZEN)
@@ -692,6 +712,7 @@ No universal exactly-once claim (ADR-004 §9). Desired invariant: **exactly-once
 | --- | --- |
 | `status` | Lifecycle above |
 | `locked_by` / worker identity | Claim holder while `RUNNING` |
+| `claim_epoch` (or `fencing_token`) | Monotonic ownership generation; incremented on every successful claim/reclaim |
 | `lease_expires_at` | Visibility timeout; expired `RUNNING` is reclaimable |
 | `attempt_count` | Processing attempts |
 | `next_attempt_at` | Eligibility time (`PENDING` when `next_attempt_at <= now`) |
@@ -701,24 +722,52 @@ No universal exactly-once claim (ADR-004 §9). Desired invariant: **exactly-once
 
 1. `PENDING` jobs become eligible when `next_attempt_at <= now`.
 2. Worker claims inside a PostgreSQL transaction using `SELECT … FOR UPDATE SKIP LOCKED` on eligible rows.
-3. Claim MUST set `RUNNING`, `locked_by`, and a future `lease_expires_at` (bounded lease; numeric default **OPEN**).
-4. Worker crash MUST NOT permanently stall the job: when `RUNNING` and `lease_expires_at < now()`, the job is **reclaimable** (treat as eligible for claim again; typically return to claimable `PENDING`/`RUNNING`-expired semantics by resetting status to `PENDING` or allowing reclaim of expired `RUNNING` — either is acceptable if reclaim is exclusive and lease-gated).
+3. Claim MUST set `RUNNING`, `locked_by`, a future `lease_expires_at`, and **increment `claim_epoch`** (or issue a new `fencing_token`) so the claim has a unique ownership generation.
+4. Worker crash MUST NOT permanently stall the job: when `RUNNING` and `lease_expires_at < now()`, the job is **reclaimable** (exclusive lease-gated reclaim that also advances `claim_epoch`).
 5. Expired `RUNNING` leases MUST become reclaimable under (4).
 6. Reclaim is **at-least-once**: handlers MUST be idempotent; no exactly-once worker assumption.
-7. **Retryable failure:** increment `attempt_count`, set `last_error`, schedule `next_attempt_at` with bounded backoff, set `PENDING`. Max attempts threshold **OPEN** numerically but MUST exist.
-8. **Permanent failure / exhausted attempts:** transition to `DEAD_LETTER`, preserve evidence (`last_error`, attempts); do not silently delete.
-9. **Success:** durable transition to `SUCCEEDED`.
-10. Duplicate execution (reclaim after partial work) MUST be safe via idempotent handlers.
+7. **Retryable failure:** increment `attempt_count`, set `last_error`, schedule `next_attempt_at` with bounded backoff, set `PENDING` — **only if** the writer still owns the current `claim_epoch` / fencing identity (§11.4).
+8. **Permanent failure / exhausted attempts:** transition to `DEAD_LETTER` under the same fencing condition; preserve evidence; do not silently delete.
+9. **Success:** durable transition to `SUCCEEDED` under fencing (§11.4).
+10. Duplicate execution (reclaim after partial work) MUST be safe via idempotent handlers **and** fencing.
 11. Handlers that can cause external or financial side effects MUST be idempotent and keyed by durable operation/job identity.
 12. No assumption of exactly-once worker execution.
+
+### 11.4 Fencing / conditional completion (IA-FROZEN / ARCHITECTURAL REQUIREMENT)
+
+Every claimed job MUST carry a unique ownership generation (`claim_epoch` or equivalent `fencing_token`).
+
+Transitions:
+
+```text
+RUNNING → SUCCEEDED
+RUNNING → DEAD_LETTER
+RUNNING → PENDING   (retry path)
+```
+
+MUST be **conditional** on current ownership. Conceptually:
+
+```text
+UPDATE outbox
+SET status = $next, ...
+WHERE id = $job_id
+  AND claim_epoch = $epoch_held_by_this_worker
+  AND locked_by = $this_worker
+  AND lease_expires_at > now()   -- still valid under this claim
+```
+
+If the conditional update matches zero rows, the completion MUST **fail closed** as a **no-op** (stale writer).
+
+**Stale worker rule:** A worker whose lease/claim has been superseded MUST NOT mutate authoritative job state. Idempotent handlers remain required; fencing is an **additional** operational safety boundary. `FOR UPDATE SKIP LOCKED` alone does not prevent stale completion after lease loss.
 
 **Claim sketch (illustrative):**
 
 ```text
--- reclaim expired RUNNING into PENDING (or claim expired RUNNING directly)
--- then:
 UPDATE outbox
-SET status = 'RUNNING', locked_by = $worker, lease_expires_at = now() + lease,
+SET status = 'RUNNING',
+    locked_by = $worker,
+    lease_expires_at = now() + lease,
+    claim_epoch = claim_epoch + 1,
     attempt_count = attempt_count + 1
 WHERE id IN (
   SELECT id FROM outbox
@@ -728,6 +777,7 @@ WHERE id IN (
   FOR UPDATE SKIP LOCKED
   LIMIT N
 )
+RETURNING id, claim_epoch
 ```
 
 ---
@@ -762,6 +812,7 @@ Provider SDKs stay in adapter crates; **never** leak provider enums into public 
 - Timeouts → disposition uncertainty on PaymentAttempt; not automatic transaction `FAILED`
 - Webhooks verified, durably stored as observations, applied idempotently against PaymentAttempt
 - Provider operation identity stored for reconciliation
+- This protocol strengthens safety under at-least-once delivery; it is **not** a claim of universal exactly-once external execution (ADR-004)
 
 ### 12.4 PaymentAttempt (IA-FROZEN durable protocol)
 
@@ -778,7 +829,7 @@ Provider SDKs stay in adapter crates; **never** leak provider enums into public 
 | `idempotency_key` / reservation link | When created under an idempotent command |
 | `provider_adapter` | Adapter identity (e.g. `mock`, later `xendit`) — not a public domain enum leak |
 | `provider_ref` | Provider-side reference when known |
-| `provider_idempotency_key` | Key sent to provider when supported |
+| `provider_idempotency_key` | Stable key for the provider call; assigned **before** `SUBMITTED` commit |
 | `status` | Attempt lifecycle below |
 | `outcome_disposition` | Aligns with ADR-007 uncertainty (`TIMEOUT` / `UNKNOWN` / …) where applicable |
 | timestamps | created/updated |
@@ -787,27 +838,54 @@ Provider SDKs stay in adapter crates; **never** leak provider enums into public 
 
 | Status | Meaning |
 | --- | --- |
-| `PREPARED` | Durably inserted; **no** provider I/O yet |
-| `SUBMITTED` | Provider call attempted / in flight from TX4’s perspective |
+| `PREPARED` | Durably inserted; **provider I/O MUST NOT occur** until `SUBMITTED` is committed |
+| `SUBMITTED` | Durable marker that provider submission is **potentially in flight**; committed **before** provider I/O |
 | `UNKNOWN` | Timeout or lost response; external outcome uncertain |
 | `SUCCEEDED` | TX4 has evidence of provider-side success for this attempt |
 | `FAILED` | TX4 has evidence of known provider/operation failure for this attempt (≠ transaction `FAILED` automatically) |
 
 Refund execution product remains **OPEN**; do not encode full refund product states here. Later refund attempts may be separate records.
 
-**Normative rules:**
+### 12.4.1 Durable submission boundary (IA-FROZEN / ARCHITECTURAL REQUIREMENT)
 
-1. PaymentAttempt MUST be durably created in `PREPARED` **before** provider I/O.
+**Invariant:** Before **any** provider I/O for a payment attempt, `PREPARED → SUBMITTED` MUST be durably persisted and **committed**. `SUBMITTED` establishes that provider submission is considered potentially in-flight.
+
+Normative sequence:
+
+```text
+BEGIN DB TX
+  create/validate PaymentAttempt (PREPARED) if needed
+  assign stable provider_idempotency_key (same logical attempt identity)
+  transition PREPARED → SUBMITTED
+COMMIT
+ONLY NOW → provider I/O (outside DB locks; reuse provider_idempotency_key)
+```
+
+Retrying the **same** logical provider operation MUST reuse the same durable PaymentAttempt / `operation_id` / `provider_idempotency_key` — not create an unrelated external side effect. Creating a **new** PaymentAttempt for crash recovery while an existing attempt is `SUBMITTED`/`UNKNOWN`/`SUCCEEDED`/`FAILED` is **forbidden** as a blind-retry strategy.
+
+### 12.4.2 Reclaim integration with idempotency (normative)
+
+When an idempotency reservation is reclaimed (§9.2(7)), apply this predicate to the bound PaymentAttempt:
+
+| Attempt status | Allowed action |
+| --- | --- |
+| `PREPARED` (never committed `SUBMITTED`) | First submission via §12.4.1 only |
+| `SUBMITTED` / `UNKNOWN` / `SUCCEEDED` / `FAILED` | Reconcile/query first; no new blind provider side effect |
+
+**Lease expiry is not evidence that provider I/O did not occur.**
+
+### 12.4.3 Additional normative rules
+
+1. PaymentAttempt MUST be durably created in `PREPARED` before the submission boundary of §12.4.1.
 2. PaymentAttempt MUST have a stable `attempt_id` / `operation_id`.
 3. MUST link `tenant_id`, `transaction_id`, `operation_id`, and idempotency context when applicable (same DB txn as reservation per §9.2).
-4. Provider requests MUST carry/use stable provider idempotency identity where the provider supports it.
+4. Provider requests MUST carry/use the stable `provider_idempotency_key` where the provider abstraction supports idempotency.
 5. Timeout → `UNKNOWN` (or equivalent disposition); MUST NOT alone move transaction to `FAILED`.
-6. Recovery MUST reconcile/query the **existing** attempt before creating a new external side effect.
+6. Recovery MUST reconcile/query the **existing** attempt before creating a new external side effect when status is not purely pre-submission `PREPARED`.
 7. Duplicate webhooks resolve against the durable attempt + observation uniqueness.
 8. PaymentAttempt history MUST NOT replace or silently rewrite TX4 primary lifecycle authority (ADR-007).
 
 ---
-
 ## 13. Money Architecture (ADR-006 → Rust)
 
 ### 13.1 Types (IA-FROZEN)
@@ -1177,6 +1255,7 @@ Single-node acceptable for small self-host; split API/worker processes even on o
 
 ### Phase 5 — Financial primitives (fee/ledger foundations)
 
+- **Prereq:** Ledger posting convention MUST be selected/frozen before this phase (§14.3 remains **OPEN** until that gate)
 - **Deliverables:** ledger entries, fee hooks as generic infra
 - **Invariants:** append-only; no competing balances
 - **Exit:** ledger invariant tests
@@ -1229,15 +1308,15 @@ Initial TX4 production OSS cut is architecture-complete only when evidence shows
 
 ## 33. OPEN vs IA-FROZEN Summary
 
-### IA-FROZEN by this specification (pending AUDIT-022)
+### IA-FROZEN by this specification (pending AUDIT-023)
 
 - Tokio, Axum, PostgreSQL, SQLx, Serde, tracing+OTel-compatible, REST+OpenAPI, SQLx migrations, Docker packaging
 - Hybrid relational persistence with explicit **mutable operational** vs **append-only evidence/financial** taxonomy (not event sourcing)
 - `FOR UPDATE` + version concurrency; global lock order; bounded deadlock/serialization retry
-- Durable idempotency reservation protocol with lease/reclaim
-- Outbox/job lifecycle `PENDING|RUNNING|SUCCEEDED|DEAD_LETTER` with lease reclaim
+- Durable idempotency reservation protocol with lease/reclaim + PaymentAttempt reclaim predicate
+- PaymentAttempt durable submission boundary: committed `PREPARED → SUBMITTED` **before** provider I/O
+- Outbox/job lifecycle `PENDING|RUNNING|SUCCEEDED|DEAD_LETTER` with lease reclaim + **claim_epoch fencing** + conditional completion
 - `UNIQUE (tenant_id, operation_id)` (and idempotency key uniqueness)
-- PaymentAttempt durable protocol (create before provider I/O)
 - Money: authoritative `i64` + checked `i128` intermediates; string JSON amounts; no float authority
 - Minimal deployment operational contract (migrate-before-ready, readiness/liveness, graceful shutdown, reconnect)
 
@@ -1256,7 +1335,7 @@ Initial TX4 production OSS cut is architecture-complete only when evidence shows
 | ADR-001 Rust | Compatible — Rust selected |
 | ADR-002 Apache-2.0 | Compatible — no license change; deps must follow ADR-003 |
 | ADR-003 | Compatible — selections are permissive-ecosystem; concrete crate license review at add-time |
-| ADR-004 SoT | Compatible — Postgres is technology; authorities unchanged |
+| ADR-004 SoT | Compatible — Postgres is technology; authorities unchanged; submission boundary ≠ universal exactly-once claim |
 | ADR-005 | Compatible — `/v1` REST |
 | ADR-006 | Compatible — integer atomic + string JSON; half-even; allocation; i128 intermediates |
 | ADR-007 | Compatible — matrix/precedence/uncertainty implemented, not replaced |
@@ -1274,9 +1353,9 @@ This document does **not**:
 - add `src/`, `crates/`, migrations, or dependencies
 - authorize coding
 
-TASK-018R remediates AUDIT-021 findings in this file only.
+TASK-018RR remediates AUDIT-022 findings in this file only.
 
-Next gate: **AUDIT-022** (re-audit after remediation).
+Next gate: **AUDIT-023** (independent re-audit after TASK-018RR).
 
 ---
 
@@ -1286,3 +1365,4 @@ Next gate: **AUDIT-022** (re-audit after remediation).
 | --- | --- |
 | 2026-09-25 | TASK-018 created PROPOSED implementation architecture |
 | 2026-09-25 | TASK-018R remediated AUDIT-021 findings (persistence taxonomy, idempotency/outbox leases, money intermediates, locks, PaymentAttempt, ops contract) |
+| 2026-09-25 | TASK-018RR remediated AUDIT-022 findings (SUBMITTED-before-I/O, outbox fencing, taxonomy, worktree integrity) |
