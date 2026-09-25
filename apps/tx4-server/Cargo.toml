@@ -4,13 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "TX4 HTTP server application (bootstrap only in Phase-1A)"
+description = "TX4 HTTP server application"
 
 [[bin]]
 name = "tx4-server"
 path = "src/main.rs"
 
 [dependencies]
+tracing = { workspace = true }
 tx4-api = { workspace = true }
 tx4-config = { workspace = true }
 tx4-observability = { workspace = true }

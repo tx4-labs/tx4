@@ -29,6 +29,15 @@ pub const DEFAULT_DATABASE_MIN_CONNECTIONS: u32 = 0;
 /// Default pool acquire timeout seconds when `TX4_DATABASE_ACQUIRE_TIMEOUT_SECS` is unset.
 pub const DEFAULT_DATABASE_ACQUIRE_TIMEOUT_SECS: u64 = 30;
 
+/// Default service name when `TX4_SERVICE_NAME` is unset.
+pub const DEFAULT_SERVICE_NAME: &str = "tx4";
+
+/// Default deployment environment label when `TX4_ENVIRONMENT` is unset.
+pub const DEFAULT_ENVIRONMENT: &str = "development";
+
+/// Default tracing filter directive when `TX4_LOG_LEVEL` is unset.
+pub const DEFAULT_LOG_LEVEL: &str = "info";
+
 /// Validated immutable process configuration for TX4 runtime apps.
 #[derive(Clone)]
 pub struct Config {
@@ -44,6 +53,15 @@ pub struct Config {
     pub database_acquire_timeout: Duration,
     /// Optional attempt budget default (`TX4_ATTEMPT_BUDGET_DEFAULT`).
     pub attempt_budget_default: Option<u32>,
+    /// Service name for observability resource attributes (`TX4_SERVICE_NAME`).
+    pub service_name: String,
+    /// Environment label for observability (`TX4_ENVIRONMENT`).
+    pub environment: String,
+    /// Tracing filter / log level directive (`TX4_LOG_LEVEL`).
+    pub log_level: String,
+    /// Optional OTLP endpoint for OpenTelemetry-compatible export (`TX4_OTLP_ENDPOINT`).
+    /// Hosted vendor remains OPEN; this stores the endpoint only.
+    pub otlp_endpoint: Option<String>,
 }
 
 impl Config {
@@ -128,6 +146,57 @@ impl Config {
             }
         };
 
+        let service_name = optional(vars, "TX4_SERVICE_NAME")
+            .map(str::to_owned)
+            .unwrap_or_else(|| DEFAULT_SERVICE_NAME.to_owned());
+        if service_name.trim().is_empty() {
+            return Err(ConfigError::InvalidValue {
+                key: "TX4_SERVICE_NAME",
+                reason: "must not be empty when set",
+            });
+        }
+
+        let environment = optional(vars, "TX4_ENVIRONMENT")
+            .map(str::to_owned)
+            .unwrap_or_else(|| DEFAULT_ENVIRONMENT.to_owned());
+        if environment.trim().is_empty() {
+            return Err(ConfigError::InvalidValue {
+                key: "TX4_ENVIRONMENT",
+                reason: "must not be empty when set",
+            });
+        }
+
+        let log_level = optional(vars, "TX4_LOG_LEVEL")
+            .map(str::to_owned)
+            .unwrap_or_else(|| DEFAULT_LOG_LEVEL.to_owned());
+        if log_level.trim().is_empty() {
+            return Err(ConfigError::InvalidValue {
+                key: "TX4_LOG_LEVEL",
+                reason: "must not be empty when set",
+            });
+        }
+
+        let otlp_endpoint = match optional(vars, "TX4_OTLP_ENDPOINT") {
+            None => None,
+            Some(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    return Err(ConfigError::InvalidValue {
+                        key: "TX4_OTLP_ENDPOINT",
+                        reason: "must not be empty when set",
+                    });
+                }
+                // Reject credential-bearing URLs in OTLP config to avoid secret leakage.
+                if trimmed.contains('@') {
+                    return Err(ConfigError::InvalidValue {
+                        key: "TX4_OTLP_ENDPOINT",
+                        reason: "must not embed credentials",
+                    });
+                }
+                Some(trimmed.to_owned())
+            }
+        };
+
         Ok(Self {
             http_bind,
             database_url: SecretString::new(database_url),
@@ -135,6 +204,10 @@ impl Config {
             database_min_connections,
             database_acquire_timeout: Duration::from_secs(acquire_secs),
             attempt_budget_default,
+            service_name,
+            environment,
+            log_level,
+            otlp_endpoint,
         })
     }
 }
@@ -148,6 +221,10 @@ impl std::fmt::Debug for Config {
             .field("database_min_connections", &self.database_min_connections)
             .field("database_acquire_timeout", &self.database_acquire_timeout)
             .field("attempt_budget_default", &self.attempt_budget_default)
+            .field("service_name", &self.service_name)
+            .field("environment", &self.environment)
+            .field("log_level", &self.log_level)
+            .field("otlp_endpoint", &self.otlp_endpoint)
             .finish()
     }
 }
@@ -234,6 +311,43 @@ mod tests {
             Duration::from_secs(DEFAULT_DATABASE_ACQUIRE_TIMEOUT_SECS)
         );
         assert_eq!(cfg.attempt_budget_default, None);
+        assert_eq!(cfg.service_name, DEFAULT_SERVICE_NAME);
+        assert_eq!(cfg.environment, DEFAULT_ENVIRONMENT);
+        assert_eq!(cfg.log_level, DEFAULT_LOG_LEVEL);
+        assert_eq!(cfg.otlp_endpoint, None);
+    }
+
+    #[test]
+    fn valid_with_observability_overrides() {
+        let mut m = base_vars();
+        m.insert("TX4_SERVICE_NAME".to_owned(), "tx4-server".to_owned());
+        m.insert("TX4_ENVIRONMENT".to_owned(), "staging".to_owned());
+        m.insert("TX4_LOG_LEVEL".to_owned(), "debug".to_owned());
+        m.insert(
+            "TX4_OTLP_ENDPOINT".to_owned(),
+            "http://127.0.0.1:4317".to_owned(),
+        );
+        let cfg = Config::from_map(&m).unwrap();
+        assert_eq!(cfg.service_name, "tx4-server");
+        assert_eq!(cfg.environment, "staging");
+        assert_eq!(cfg.log_level, "debug");
+        assert_eq!(cfg.otlp_endpoint.as_deref(), Some("http://127.0.0.1:4317"));
+    }
+
+    #[test]
+    fn rejects_otlp_endpoint_with_embedded_credentials() {
+        let mut m = base_vars();
+        m.insert(
+            "TX4_OTLP_ENDPOINT".to_owned(),
+            "http://user:pass@collector:4317".to_owned(),
+        );
+        assert!(matches!(
+            Config::from_map(&m).unwrap_err(),
+            ConfigError::InvalidValue {
+                key: "TX4_OTLP_ENDPOINT",
+                ..
+            }
+        ));
     }
 
     #[test]

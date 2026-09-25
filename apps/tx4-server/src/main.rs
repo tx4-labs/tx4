@@ -1,12 +1,34 @@
 //! TX4 server binary.
 //!
-//! Phase-1A: bootstrap skeleton only. No HTTP listen, routes, or DB.
+//! Phase-1D: configuration → observability initialization → bootstrap.
+//! No HTTP listen, routes, or business endpoints.
 
-fn main() {
-    // Reference library crates so the dependency boundary is exercised at link time.
-    let _ = (
-        tx4_api::crate_name(),
-        tx4_config::crate_name(),
-        tx4_observability::crate_name(),
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    let config = match tx4_config::Config::from_env() {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            eprintln!("config: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let _observability = match tx4_observability::init(&config) {
+        Ok(guard) => guard,
+        Err(err) => {
+            eprintln!("observability: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    tracing::info!(
+        service = %config.service_name,
+        environment = %config.environment,
+        http_bind = %config.http_bind,
+        api = tx4_api::crate_name(),
+        "tx4-server bootstrap (no business routes)"
     );
+
+    ExitCode::SUCCESS
 }

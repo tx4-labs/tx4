@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "TX4 observability helpers boundary (tracing/OTel — later phases)"
+description = "TX4 observability helpers (tracing + OTel-compatible export interface)"
 
 [dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tx4-config = { workspace = true }
