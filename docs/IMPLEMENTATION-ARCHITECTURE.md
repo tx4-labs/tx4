@@ -3,10 +3,11 @@
 | Field | Value |
 | --- | --- |
 | Document | **IMPLEMENTATION-ARCHITECTURE** |
-| Status | **PROPOSED** (awaiting AUDIT-021) |
+| Status | **PROPOSED** (remediated TASK-018R; awaiting AUDIT-022) |
 | Date | 2026-09-25 |
-| Authorizing task | TASK-018 |
-| Baseline | `ec3b80dafd8328b363a89bbb5b7e4b9ea83508a9` |
+| Authorizing task | TASK-018; remediated by TASK-018R |
+| Baseline (TASK-018) | `ec3b80dafd8328b363a89bbb5b7e4b9ea83508a9` |
+| Remediation baseline | `22f8172f014e1a2b689a467ced250eeea14f1535` (AUDIT-021) |
 | Authorization basis | AUDIT-020 PASS; Architecture Decision Phase COMPLETE |
 | Scope | Implementation architecture specification only — **not** implementation authorization |
 
@@ -287,34 +288,67 @@ Managed Cloud (separate proprietary distribution) may host the same OSS binaries
 
 | Field | Value |
 | --- | --- |
-| **DECISION** | **Hybrid relational model**: (1) authoritative **current-state** relational rows for aggregates; (2) **append-only** tables for financial entries, provider observations, lifecycle audit, idempotency outcomes, outbox messages, reconciliation records |
+| **DECISION** | **Hybrid relational model**: (1) authoritative **mutable current-state** relational rows for aggregates and operational processing; (2) **append-only** tables for financial entries, provider observations, lifecycle audit evidence, and reconciliation decision records |
 | **EVENT_SOURCING** | **NOT_SELECTED** as sole authoritative model |
 | **RATIONALE** | ADR-007 needs a clear current primary state and deterministic transitions under concurrency. A single current-state row (with version/lock) is the simplest authoritative representation that maps to row locks and unique constraints. Financial and audit facts need immutability — append-only records provide evidence without rewriting primary history (ADR-007 Option C). Full event sourcing would reconstruct state from events as authority, adding complexity, snapshot/rebuild machinery, and dual-representation risk without improving SoT clarity for the initial product. |
 | **ALTERNATIVES** | Pure event sourcing; pure mutable state without audit; CQRS with dual write as dual authority (rejected) |
-| **TRADE-OFFS** | Must keep append-only streams consistent with current state via same DB transaction; history is not a second writable authority |
+| **TRADE-OFFS** | Must keep append-only evidence consistent with current state via same DB transaction when both are written; history is not a second writable authority |
 | **FROZEN_OR_OPEN** | **IA-FROZEN** |
 
-### 4.2 Authority map
+### 4.1.1 Taxonomy (ARCHITECTURAL REQUIREMENT)
 
-| Data | Role |
-| --- | --- |
-| Transaction current primary state (+ version) | **Authoritative current state** |
-| Payment attempt / outcome disposition rows | **Authoritative operation evidence** (TX4 view); provider remains provider-side SoT |
-| Ledger entries (immutable) | **Authoritative TX4 internal financial records** |
-| Materialized balances (if any) | **Derived cache** — must be rebuildable from entries |
-| Lifecycle transition audit / event log | **Historical evidence** (not a competing writable state) |
-| Idempotency records | **Authoritative duplicate-detection + stored response** |
-| Outbox rows | **Durable intent to publish/work** — not domain SoT |
-| Provider observation / webhook raw+normalized | **Observed evidence** |
-| Reconciliation discrepancy/resolution | **Authoritative TX4 reconciliation decisions** |
-| Cloud control-plane state | **Separate** (ADR-008) — not in OSS domain DB authority |
+**Durable does NOT imply append-only.**  
+**Append-only does NOT mean event sourcing.**
+
+#### A. Mutable operational state (durable, updatable)
+
+These rows are durable in PostgreSQL and **may be updated in place**. They MUST NOT be described as append-only.
+
+| Record | Mutability | Authority role | Purpose |
+| --- | --- | --- | --- |
+| Transaction current primary state (+ version) | **Mutable** | **Authoritative** current TX4 lifecycle state | Current aggregate state |
+| Idempotency reservation | **Mutable** | **Authoritative** for duplicate detection + stored API/command result | Lease, status, replay |
+| Outbox / job record | **Mutable** | **Authoritative** for async work scheduling only — **not** domain SoT | Claim, lease, retry, completion |
+| Worker lease / claim metadata (on outbox/job) | **Mutable** | Operational processing state | Prevent stuck work; enable reclaim |
+| PaymentAttempt current status / disposition fields | **Mutable** (status) | **Authoritative** TX4 view of that attempt’s progress; provider remains provider-side SoT | Bind provider I/O; uncertainty; reconcile |
+| Retry / processing counters on operational rows | **Mutable** | Operational | Backoff, attempt budgets at row level |
+
+#### B. Append-only evidence / financial records
+
+These rows are **immutable after insert** (corrections = new rows). They are **not** event-sourced reconstruction of aggregate authority.
+
+| Record | Mutability | Authority role | Purpose |
+| --- | --- | --- | --- |
+| Ledger entries | **Append-only** | **Authoritative** TX4 internal financial records | Money movements as TX4 records them |
+| Lifecycle transition audit / evidence log | **Append-only** | **Historical evidence** (not competing writable state) | Who/what transitioned when |
+| Provider observations (raw + normalized) | **Append-only** | **Observed evidence** | Webhooks/polls as received |
+| Reconciliation discrepancy / resolution records | **Append-only** (new resolution rows) | **Authoritative** TX4 reconciliation decisions | Detect/resolve without fabricating certainty |
+| Compensating-obligation intent records | **Append-only** (intent row; later refund execution separate) | **Authoritative** intent evidence per ADR-007 §6.1 | Fail-closed post-pay exits |
+| Materialized balances (if any) | **Mutable cache** | **Derived only** — rebuildable from ledger entries | Performance; never second authority |
+
+Cloud control-plane state remains **separate** (ADR-008) and is not OSS domain DB authority.
+
+### 4.2 Authority map (summary)
+
+| Data | Mutable / append-only | Role |
+| --- | --- | --- |
+| Transaction current primary state (+ version) | Mutable | **Authoritative current state** |
+| PaymentAttempt | Mutable status + appendable observations | **Authoritative attempt evidence** (TX4 view); provider remains provider-side SoT |
+| Ledger entries | Append-only | **Authoritative TX4 internal financial records** |
+| Materialized balances (if any) | Derived mutable cache | **Derived** — rebuildable |
+| Lifecycle transition audit | Append-only | **Historical evidence** |
+| Idempotency reservation | Mutable operational | **Authoritative** duplicate-detection + stored result |
+| Outbox / job | Mutable operational | Durable work intent — **not** domain SoT |
+| Provider observations | Append-only | **Observed evidence** |
+| Reconciliation decisions | Append-only | **Authoritative** TX4 reconcile decisions |
 
 ### 4.3 Rules
 
 1. No competing authoritative balances for the same internal economic fact (ADR-004).
 2. Do not store authoritative financial/transaction state only in process memory.
-3. Append-only financial rows are never updated in place for “corrections”; corrections are new compensating entries.
+3. Append-only financial/evidence rows are never updated in place for “corrections”; corrections are new compensating entries.
 4. Do not claim event-sourced reconstruction is required for correctness in v1.
+5. Do not label idempotency or outbox/job tables as append-only.
 
 ---
 
@@ -332,7 +366,7 @@ tx4/                          # OSS repository
     tx4-application/          # use-cases / commands / ports
     tx4-persistence/          # SQLx + migrations + repositories
     tx4-api/                  # Axum routes, DTOs, OpenAPI glue
-    tx4-adapters-payment/     # PaymentProvider trait + Mock (+ later adapters)
+    tx4-adapters-payment/     # implements PaymentProvider port (+ Mock; later adapters)
     tx4-worker/               # outbox/job processor library or bin-shared
     tx4-observability/        # tracing/OTel bootstrap helpers
     tx4-config/               # config load/validate
@@ -350,16 +384,20 @@ tx4/                          # OSS repository
 
 ### 5.2 Dependency direction (normative)
 
+**Port location (IA-FROZEN):** Provider and infrastructure **ports/interfaces are defined in `tx4-application`** (the application boundary). Infrastructure adapters depend **inward** on those ports. Domain types/invariants live in `tx4-domain`; application may depend on domain; adapters must not invert that.
+
 ```text
 apps (server/worker/cli)
-    ↓
+        ↓
 tx4-api / tx4-worker
-    ↓
-tx4-application
-    ↓
+        ↓
+tx4-application   ←── ports defined here (TransactionRepository, PaymentProvider,
+        ↓                 Outbox, Clock, IdGenerator, …)
 tx4-domain
-    ↑
-tx4-persistence, tx4-adapters-*  (implement ports defined in application/domain)
+
+tx4-persistence ───────────┐
+tx4-adapters-payment ──────┤── depend on tx4-application ports (+ tx4-domain types)
+                           │   implement adapters inward
 ```
 
 **Illegal:**
@@ -373,9 +411,9 @@ tx4-persistence, tx4-adapters-*  (implement ports defined in application/domain)
 
 **Legal:**
 
-- Application defines ports (`TransactionRepository`, `PaymentProvider`, `Outbox`, `Clock`, `IdGenerator`)
-- Persistence/adapters implement ports
-- API maps HTTP ↔ commands/queries
+- `tx4-application` defines ports
+- `tx4-persistence` / `tx4-adapters-*` implement those ports
+- API maps HTTP ↔ application commands/queries
 
 ### 5.3 OSS / Cloud package boundary
 
@@ -488,53 +526,123 @@ For C1/C2/C3 and `PROCESSING→FAILED`, insert durable compensating-intent row *
 
 ```text
 WRONG: BEGIN; FOR UPDATE; call provider; COMMIT;
-RIGHT: prepare intent → call provider (outside lock) → BEGIN; FOR UPDATE;
-       apply evidence/transition idempotently; COMMIT;
+RIGHT: durable PaymentAttempt + idempotency reservation (same DB authority)
+       → release DB locks / commit prepare phase as designed
+       → call provider (outside locks)
+       → BEGIN; FOR UPDATE (lock order §8.4); apply evidence/transition; COMMIT;
 ```
 
-External calls happen **outside** the row lock. Uncertainty after timeout is recorded as disposition, not invented `FAILED`.
+External calls happen **outside** database row locks. Uncertainty after timeout is recorded as disposition on the existing PaymentAttempt, not invented transaction `FAILED`.
 
 ### 8.3 Concurrent duplicate requests
 
-Two HTTP requests with the same idempotency key: unique constraint + lock ensures one execute path; the other reads stored result (see §9).
+Two HTTP requests with the same idempotency key: §9 reservation protocol ensures only one acquires execution; the other follows non-executing duplicate behavior.
+
+### 8.4 Lock acquisition order (IA-FROZEN)
+
+Commands that touch multiple authoritative/operational rows in one PostgreSQL transaction MUST acquire locks in this **global order**:
+
+1. **Idempotency reservation** row (`tenant_id`, `idempotency_key`) when the command is idempotent
+2. **Transaction aggregate** row (`tenant_id`, `transaction_id`)
+3. **Related child / attempt rows** for that aggregate (e.g. PaymentAttempt being updated), ordered by primary key ascending when multiple
+
+Outbox enqueue within the same DB transaction locks/inserts outbox rows **after** the aggregate lock is held (inserts do not require a pre-existing lock order beyond unique constraints).
+
+Never acquire locks in the reverse of this order in a different code path.
+
+### 8.5 Transient database conflict retry (IA-FROZEN)
+
+| Condition | Classification | Behavior |
+| --- | --- | --- |
+| Deadlock detected by PostgreSQL | Retryable infrastructure | Abort txn; **bounded retry** of the same idempotent command path |
+| Serialization / concurrent update conflict | Retryable infrastructure | Same as above |
+| Permanent business rejection / matrix forbid / fingerprint conflict | **Not** retryable as infra | Return business/conflict error; do not loop |
+
+**Bounded retry:** finite attempts with backoff (exact numeric defaults **OPEN**; architecture requires a documented upper bound). After exhaustion → retryable/infra error to client (e.g. 503), not silent success.
+
+Retries MUST re-enter through the **same idempotent command path** (§9). Do **not** retry permanently failed business operations. Do **not** perform external provider I/O while database locks are held.
 
 ---
 
 ## 9. Idempotency Architecture
 
-### 9.1 Decision
+### 9.0 Distinction (ARCHITECTURAL REQUIREMENT)
 
-Durable **idempotency records** in PostgreSQL:
+```text
+Idempotency reservation  ≠  Business operation attempt (e.g. PaymentAttempt / lifecycle transition attempt)
+```
+
+| Concept | Role |
+| --- | --- |
+| **Idempotency reservation** | Client/command duplicate gate: lease, fingerprint, stored HTTP/command result |
+| **Business operation attempt** | Domain/provider-facing durable attempt with stable `operation_id` (see §12.4) |
+
+Both are durable. Reclaim of an idempotency lease MUST NOT erase historical evidence (audit, observations, attempts).
+
+### 9.1 Decision — mutable operational reservation
+
+Durable **idempotency reservation** rows in PostgreSQL (**mutable operational state**, §4.1.1A):
 
 | Field | Purpose |
 | --- | --- |
 | `tenant_id` | Isolation boundary |
-| `idempotency_key` | Client-supplied key (API header name OPEN; concept required) |
-| `operation_id` | Logical operation identity (ADR-007 §8.2) |
+| `idempotency_key` | Client-supplied key (API header name **OPEN**; concept required) |
+| `operation_id` | Logical operation identity (ADR-007 §8.2); **distinct** from client idempotency key |
 | `request_fingerprint` | Hash of critical request body fields |
 | `transaction_id` | Association when applicable |
 | `status` | `IN_PROGRESS` / `COMPLETED` / `FAILED_CLOSED` |
-| `response_status` + `response_body` | Stored result for replay |
-| `created_at` / `expires_at` | Retention |
+| `lease_owner` | Executor identity holding the reservation |
+| `lease_expires_at` | Bounded lease end for `IN_PROGRESS` |
+| `response_status` + `response_body` (or result reference) | Stored result for replay when finalized |
+| `created_at` / `updated_at` | Timestamps |
+| `expires_at` | Retention window for the reservation row (TTL policy) |
 
-**Uniqueness:** `(tenant_id, idempotency_key)` unique. Optional unique `(tenant_id, operation_id)`.
+**Uniqueness (IA-FROZEN):**
 
-### 9.2 Behavior
+- `UNIQUE (tenant_id, idempotency_key)`
+- `UNIQUE (tenant_id, operation_id)` — normative; prevents duplicate logical operation application (ADR-007). Equivalent uniqueness on a durable transition-attempt table is acceptable **only if** it is the single enforcement point and still unique per tenant.
+
+### 9.2 Normative protocol (IA-FROZEN)
+
+**Statuses:** `IN_PROGRESS` | `COMPLETED` | `FAILED_CLOSED`
+
+1. **Reservation.** The reservation MUST be durable in PostgreSQL before side effects that must not duplicate.
+
+2. **Atomicity.** Where the command creates a business operation attempt (e.g. PaymentAttempt) under the same database authority, the idempotency reservation (`IN_PROGRESS` + lease) and that attempt row MUST be inserted/updated in the **same PostgreSQL transaction**.
+
+3. **Duplicate while active (selected initial behavior).** If another request observes an **active** `IN_PROGRESS` reservation (lease not expired) for the same key + same fingerprint: it MUST **NOT** execute the operation. It MUST return a **deterministic in-progress result** (exact HTTP status code **OPEN**; behavior class fixed: non-executing in-progress/conflict). Different fingerprint → fingerprint **conflict**; do not apply.
+
+4. **Lease.** Every `IN_PROGRESS` MUST carry `lease_owner` + `lease_expires_at` (bounded; numeric default **OPEN**).
+
+5. **Crash reclaim.** When `status = IN_PROGRESS` and `lease_expires_at < now()`, a claimant MAY reclaim **only** by: (a) locking the reservation row, (b) verifying expiry, (c) setting new `lease_owner` / `lease_expires_at`, (d) **not** blindly re-running external side effects — see (7).
+
+6. **External side-effect protection.** Before provider I/O, a durable PaymentAttempt (or equivalent attempt) with stable identity MUST already exist (§12.4).
+
+7. **Reclaim ≠ blind re-execution.** If provider I/O may already have occurred for the bound attempt, recovery MUST **reconcile/query** that attempt first; only then may a new external side effect be created under a **new** attempt identity if policy allows.
+
+8. **Completion.** On success, durably set `COMPLETED` with stored result in the same DB transaction as the business result being finalized (or immediately after under the same command’s commit boundary without releasing the reservation to another executor mid-finalize).
+
+9. **Failure.** Permanent business failure of the command may finalize `FAILED_CLOSED` with stored error result per domain rules. Do not use `FAILED_CLOSED` for mere provider timeout/uncertainty.
+
+10. **Restart.** Process restart loses only in-memory work; reservations and attempts in PostgreSQL remain authoritative.
+
+11. **Concurrent first writers.** Only one insert wins `UNIQUE (tenant_id, idempotency_key)`; losers re-read and follow (3) or completed/failed replay.
+
+12. **Lease expiry** updates reservation lease/status mechanics only; it MUST NOT delete audit, PaymentAttempt, observation, or ledger evidence.
+
+### 9.3 Behavior summary
 
 | Case | Outcome |
 | --- | --- |
-| First request | Insert `IN_PROGRESS`, execute, store result `COMPLETED` |
-| Duplicate same fingerprint | Return stored result; no new financial effect |
-| Same key, different fingerprint | **Conflict** (4xx business conflict); do not apply |
-| Concurrent inserts | One wins unique constraint; loser re-reads |
-
-### 9.3 Survival
-
-Survives process restart, retry, network timeout, duplicate delivery, concurrent duplicates — because authority is PostgreSQL, not memory (ADR-004).
+| First request | Insert `IN_PROGRESS` + lease (+ attempt if needed) atomically; execute; finalize `COMPLETED` / `FAILED_CLOSED` |
+| Duplicate, `COMPLETED`, same fingerprint | Return stored result; no new financial effect |
+| Duplicate, active `IN_PROGRESS`, same fingerprint | Non-executing deterministic in-progress/conflict |
+| Same key, different fingerprint | Conflict; do not apply |
+| Expired `IN_PROGRESS` | Reclaim per §9.2(5–7); reconcile before new provider I/O |
 
 ### 9.4 Retention
 
-Idempotency rows are retained for a configurable window (default policy **OPEN** numerically; principle: long enough for client retries). Expired keys may be purged only if product policy allows; financial audit records are **not** purged by the same policy.
+Idempotency reservation rows are retained for a configurable TTL (numeric default **OPEN**; long enough for client retries). Purging a reservation MUST NOT purge financial/audit/attempt evidence. Lease expiration ≠ retention purge.
 
 ---
 
@@ -542,12 +650,16 @@ Idempotency rows are retained for a configurable window (default policy **OPEN**
 
 | Failure | Behavior |
 | --- | --- |
-| Process crash mid-request before commit | No durable transition; client retry with same idempotency key |
+| Process crash mid-request before commit | No durable transition; client retry with same idempotency key; expired `IN_PROGRESS` reclaim per §9 |
 | Crash after commit | Resume from durable state; idempotent no-op on retry |
 | DB transaction rollback | No partial authoritative write; safe retry |
-| Provider timeout | Record `TIMEOUT`/`UNKNOWN` disposition; **not** auto-`FAILED`; schedule reconcile |
-| Webhook late / duplicate / out-of-order | Durable observation + idempotent apply; ignore stale if state already advanced; never invent certainty |
-| Recovery of uncertain operation | Query provider / reconcile; promote to `KNOWN_SUCCESS`/`KNOWN_FAILURE` only with evidence |
+| Provider timeout | Mark existing PaymentAttempt uncertain (`UNKNOWN` / timeout disposition); **not** auto-`FAILED` transaction; schedule reconcile |
+| Webhook late / duplicate / out-of-order | Durable observation + idempotent apply against PaymentAttempt; ignore stale if state already advanced; never invent certainty |
+| Recovery of uncertain operation | Query provider / reconcile **existing** attempt; promote to success/failure only with evidence |
+| Worker crash after claim | Outbox lease expires; job reclaimable (§11); handlers must be idempotent |
+| Worker crash before ack | Same — lease reclaim; at-least-once |
+| Outbox remains PENDING | Eligible when `next_attempt_at <= now` |
+| Reconciliation finds external success | Apply evidence to existing attempt/transaction per ADR-007; do not fabricate |
 
 **Distinguish:**
 
@@ -565,33 +677,66 @@ No universal exactly-once claim (ADR-004 §9). Desired invariant: **exactly-once
 
 | Field | Value |
 | --- | --- |
-| **DECISION** | **Transactional outbox table + dedicated worker process** polling/claiming jobs in PostgreSQL |
+| **DECISION** | **Transactional outbox / job table + dedicated worker process** polling/claiming jobs in PostgreSQL (**mutable operational state**, §4.1.1A) |
 | **QUEUE/BROKER** | **Not required** for initial architecture |
 | **RATIONALE** | Async work (webhook delivery, provider status poll, reconciliation checks, expiration sweeps) must commit atomically with domain changes. A Postgres outbox preserves that atomicity without introducing Kafka/NATS operational surface or a second durability system. At-least-once worker delivery + idempotent handlers preserve correctness under duplicate/delay. |
 | **ALTERNATIVES** | Kafka/NATS (defer until scale/ops justify); Redis queues (extra durability class); in-process only (fails crash recovery) |
-| **TRADE-OFFS** | Polling latency; need careful `SKIP LOCKED` claim pattern |
+| **TRADE-OFFS** | Polling latency; requires lease reclaim (SKIP LOCKED alone is insufficient) |
 | **FROZEN_OR_OPEN** | **IA-FROZEN** (outbox+worker); external broker **OPEN** |
 
-### 11.2 Worker claim pattern
+### 11.2 Job lifecycle (IA-FROZEN)
+
+**States:** `PENDING` | `RUNNING` | `SUCCEEDED` | `DEAD_LETTER`
+
+| Field | Purpose |
+| --- | --- |
+| `status` | Lifecycle above |
+| `locked_by` / worker identity | Claim holder while `RUNNING` |
+| `lease_expires_at` | Visibility timeout; expired `RUNNING` is reclaimable |
+| `attempt_count` | Processing attempts |
+| `next_attempt_at` | Eligibility time (`PENDING` when `next_attempt_at <= now`) |
+| `last_error` (optional metadata) | Durable error context for retries / dead-letter |
+
+### 11.3 Normative worker behavior (IA-FROZEN)
+
+1. `PENDING` jobs become eligible when `next_attempt_at <= now`.
+2. Worker claims inside a PostgreSQL transaction using `SELECT … FOR UPDATE SKIP LOCKED` on eligible rows.
+3. Claim MUST set `RUNNING`, `locked_by`, and a future `lease_expires_at` (bounded lease; numeric default **OPEN**).
+4. Worker crash MUST NOT permanently stall the job: when `RUNNING` and `lease_expires_at < now()`, the job is **reclaimable** (treat as eligible for claim again; typically return to claimable `PENDING`/`RUNNING`-expired semantics by resetting status to `PENDING` or allowing reclaim of expired `RUNNING` — either is acceptable if reclaim is exclusive and lease-gated).
+5. Expired `RUNNING` leases MUST become reclaimable under (4).
+6. Reclaim is **at-least-once**: handlers MUST be idempotent; no exactly-once worker assumption.
+7. **Retryable failure:** increment `attempt_count`, set `last_error`, schedule `next_attempt_at` with bounded backoff, set `PENDING`. Max attempts threshold **OPEN** numerically but MUST exist.
+8. **Permanent failure / exhausted attempts:** transition to `DEAD_LETTER`, preserve evidence (`last_error`, attempts); do not silently delete.
+9. **Success:** durable transition to `SUCCEEDED`.
+10. Duplicate execution (reclaim after partial work) MUST be safe via idempotent handlers.
+11. Handlers that can cause external or financial side effects MUST be idempotent and keyed by durable operation/job identity.
+12. No assumption of exactly-once worker execution.
+
+**Claim sketch (illustrative):**
 
 ```text
-UPDATE outbox SET locked_by, locked_at, attempts
+-- reclaim expired RUNNING into PENDING (or claim expired RUNNING directly)
+-- then:
+UPDATE outbox
+SET status = 'RUNNING', locked_by = $worker, lease_expires_at = now() + lease,
+    attempt_count = attempt_count + 1
 WHERE id IN (
   SELECT id FROM outbox
-  WHERE available_at <= now() AND status = 'PENDING'
-  ORDER BY available_at
+  WHERE (status = 'PENDING' AND next_attempt_at <= now())
+     OR (status = 'RUNNING' AND lease_expires_at < now())
+  ORDER BY next_attempt_at NULLS FIRST, id
   FOR UPDATE SKIP LOCKED
   LIMIT N
 )
 ```
-
-Handlers must be idempotent. Poison messages → dead-letter status + alert; do not infinite-loop money effects.
 
 ---
 
 ## 12. Payment Architecture
 
 ### 12.1 Port
+
+Ports are defined in `tx4-application` (§5.2):
 
 ```text
 PaymentProvider (port)
@@ -605,8 +750,8 @@ PaymentProvider (port)
 
 | Adapter | Class |
 | --- | --- |
-| Mock | **CORE NOW** (tests + local) |
-| Xendit / DOKU / Midtrans | **LATER** (authorized separately; license review ADR-003) |
+| Mock | **CORE NOW** (tests + local); Phase 2 may ship Mock against the port |
+| Xendit / DOKU / Midtrans | **LATER** / Phase 4 (authorized separately; license review ADR-003) |
 
 Provider SDKs stay in adapter crates; **never** leak provider enums into public `/v1` domain states.
 
@@ -614,15 +759,58 @@ Provider SDKs stay in adapter crates; **never** leak provider enums into public 
 
 - Provider authoritative for provider-side facts; TX4 authoritative for TX4 transaction state (ADR-004)
 - `transaction_state ≠ provider_state`
-- Timeouts → disposition uncertainty
-- Webhooks verified, durably stored, applied idempotently
+- Timeouts → disposition uncertainty on PaymentAttempt; not automatic transaction `FAILED`
+- Webhooks verified, durably stored as observations, applied idempotently against PaymentAttempt
 - Provider operation identity stored for reconciliation
+
+### 12.4 PaymentAttempt (IA-FROZEN durable protocol)
+
+**PaymentAttempt** is a first-class durable record (**mutable operational status** + linked append-only observations). It is **not** TX4 transaction lifecycle authority.
+
+**Minimum fields:**
+
+| Field | Purpose |
+| --- | --- |
+| `attempt_id` | Stable TX4 identity |
+| `tenant_id` | Isolation |
+| `transaction_id` | Parent aggregate |
+| `operation_id` | Logical operation identity (unique with tenant per §9.1) |
+| `idempotency_key` / reservation link | When created under an idempotent command |
+| `provider_adapter` | Adapter identity (e.g. `mock`, later `xendit`) — not a public domain enum leak |
+| `provider_ref` | Provider-side reference when known |
+| `provider_idempotency_key` | Key sent to provider when supported |
+| `status` | Attempt lifecycle below |
+| `outcome_disposition` | Aligns with ADR-007 uncertainty (`TIMEOUT` / `UNKNOWN` / …) where applicable |
+| timestamps | created/updated |
+
+**Attempt statuses (IA-FROZEN):**
+
+| Status | Meaning |
+| --- | --- |
+| `PREPARED` | Durably inserted; **no** provider I/O yet |
+| `SUBMITTED` | Provider call attempted / in flight from TX4’s perspective |
+| `UNKNOWN` | Timeout or lost response; external outcome uncertain |
+| `SUCCEEDED` | TX4 has evidence of provider-side success for this attempt |
+| `FAILED` | TX4 has evidence of known provider/operation failure for this attempt (≠ transaction `FAILED` automatically) |
+
+Refund execution product remains **OPEN**; do not encode full refund product states here. Later refund attempts may be separate records.
+
+**Normative rules:**
+
+1. PaymentAttempt MUST be durably created in `PREPARED` **before** provider I/O.
+2. PaymentAttempt MUST have a stable `attempt_id` / `operation_id`.
+3. MUST link `tenant_id`, `transaction_id`, `operation_id`, and idempotency context when applicable (same DB txn as reservation per §9.2).
+4. Provider requests MUST carry/use stable provider idempotency identity where the provider supports it.
+5. Timeout → `UNKNOWN` (or equivalent disposition); MUST NOT alone move transaction to `FAILED`.
+6. Recovery MUST reconcile/query the **existing** attempt before creating a new external side effect.
+7. Duplicate webhooks resolve against the durable attempt + observation uniqueness.
+8. PaymentAttempt history MUST NOT replace or silently rewrite TX4 primary lifecycle authority (ADR-007).
 
 ---
 
 ## 13. Money Architecture (ADR-006 → Rust)
 
-### 13.1 Types (conceptual)
+### 13.1 Types (IA-FROZEN)
 
 ```text
 CurrencyId        // catalog identity (code + catalog version concept)
@@ -632,17 +820,25 @@ Money {
 }
 ```
 
-- Intermediates for multiply/allocate MAY use `i128` or big-int, then **checked** narrow to `i64`
-- **No** `f32`/`f64` financial authority
+| Layer | Type | Rule |
+| --- | --- | --- |
+| Authoritative atomic amount | **`i64`** | Storage, domain value, JSON integer-string parsing target |
+| Multiply / allocation intermediates | **`i128`** | Checked arithmetic only |
+| Narrowing | checked `i128` → `i64` | **Fail closed** on overflow / out-of-range |
+| Arbitrary big-int | **OPEN / out of initial scope** | Not selected for initial implementation |
+| `f32` / `f64` | **Forbidden** as financial authority | ADR-006 |
+
+Additional rules:
+
 - Serde: `amount` as **string**; reject JSON numbers as sole authority
 - Half-even per ADR-006 §9; allocation per §11 (reject negative source)
 - Overflow: fail checked, never wrap
 - Comparison: same currency only; cross-currency compare forbidden without FX boundary
-- FX: **out of money core** — conversion only at explicit FX boundary with documented rate identity (**OPEN** provider)
+- FX: **out of money core** — conversion only at explicit FX boundary (**OPEN** provider)
 
 ### 13.2 Module placement
 
-`tx4-domain` owns Money primitives and property tests. Persistence stores `amount` as `BIGINT` + `currency` text/code; never `DOUBLE PRECISION` / `REAL` / `MONEY` float types.
+`tx4-domain` owns Money primitives and property tests. Persistence stores `amount` as `BIGINT` + `currency` text/code; never `DOUBLE PRECISION` / `REAL` / float-typed money.
 
 ---
 
@@ -652,7 +848,7 @@ Money {
 
 **Append-only ledger entries** as authoritative TX4 internal financial records:
 
-- `entry_id`, `tenant_id`, `transaction_id` (nullable when not tied), `account_id`, `direction` (debit/credit **or** signed amount with explicit convention — choose one convention and document in implementation), `money`, `reason`, `created_at`, `idempotency/operation_id`
+- `entry_id`, `tenant_id`, `transaction_id` (nullable when not tied), `account_id`, posting fields (see §14.3), `money`, `reason`, `created_at`, `operation_id`
 
 **Balances:** derived by summing entries (or materialized snapshot marked **derived**). Materialized balances MUST be rebuildable; never a second authority.
 
@@ -660,8 +856,13 @@ Money {
 
 Not a full ERP (AR/AP/GL productization). No silent merge with Cloud credits (ADR-004 §5.8).
 
----
+### 14.3 Posting convention status
 
+**Status: OPEN.**
+
+Ledger debit/credit vs signed-amount posting convention is **not** selected by this specification. It MUST be selected and frozen in an authorized task **before** ledger implementation (Phase 5). Do not leave the choice to silent coding judgment.
+
+---
 ## 15. Settlement Architecture
 
 TX4 records:
@@ -783,8 +984,10 @@ No claim of “secure product” until implementation + review evidence exists.
 - Spans across API → application → DB → adapter
 - Metrics: request rates, transition counts, outbox lag, reconcile backlog
 - IDs: `request_id`, `transaction_id`, `operation_id`, `provider_ref`, `tenant_id`
-- Audit events for sensitive transitions
+- Diagnostic “audit-style” log events for sensitive transitions (telemetry only)
 - Exporters OTel-compatible; **vendor OPEN**
+
+**Authority boundary:** Logs, traces, and metrics are diagnostic/operational telemetry only. They are **not** authoritative financial, lifecycle, or audit records. Durable transaction, ledger, audit, observation, and reconciliation records remain authoritative according to their defined source-of-truth roles (§4).
 
 ---
 
@@ -929,8 +1132,18 @@ Single-node acceptable for small self-host; split API/worker processes even on o
 | Self-host prod | Same binaries + managed/ops Postgres |
 | Managed Cloud later | Same OSS binaries + proprietary control plane (**vendor OPEN**) |
 
----
+### 30.3 Operational contract (IA-FROZEN)
 
+1. **Migration.** Database migrations MUST complete successfully before the application is considered ready to serve production traffic (`tx4-cli migrate` or equivalent before ready).
+2. **Startup.** Server and worker MUST validate configuration before serving or claiming work.
+3. **Readiness.** Server readiness MUST require successful database connectivity and required initialization (including schema readiness).
+4. **Liveness.** Liveness MUST distinguish process health from dependency readiness. Liveness MUST NOT permanently fail merely because PostgreSQL is temporarily unavailable if the process itself remains healthy.
+5. **Graceful server shutdown.** Stop accepting new work; drain in-flight application work within a bounded shutdown procedure (numeric timeout **OPEN**).
+6. **Graceful worker shutdown.** Stop claiming new jobs; allow active work to finish or become safely reclaimable via outbox lease (§11).
+7. **Database reconnect.** Transient database connection failures MUST use bounded retry/reconnect behavior (numeric defaults **OPEN**).
+8. **Restart.** A restarted server/worker MUST resume from durable PostgreSQL state. No claim of zero-loss or exactly-once external execution.
+
+---
 ## 31. Implementation Phases
 
 > Phases are planning only. Each requires a later authorizing task. No code in TASK-018.
@@ -944,9 +1157,9 @@ Single-node acceptable for small self-host; split API/worker processes even on o
 
 ### Phase 2 — Persistence / transaction engine
 
-- **Deliverables:** PostgreSQL schema/migrations, repositories, `FOR UPDATE` transitions, idempotency table, outbox table
-- **Invariants:** durable state; concurrency precedence; compensating intent atomicity
-- **Tests:** integration concurrency/idempotency/recovery
+- **Deliverables:** PostgreSQL schema/migrations, repositories, `FOR UPDATE` transitions, idempotency reservation protocol, outbox lease protocol, **PaymentProvider port + Mock adapter** (interface ownership stays in `tx4-application`; Mock for foundational tests)
+- **Invariants:** durable state; concurrency precedence; compensating intent atomicity; no blind re-execution
+- **Tests:** integration concurrency/idempotency/recovery/outbox reclaim
 - **Exit:** engine proof on Mock clock/provider ports
 
 ### Phase 3 — API / authentication baseline
@@ -957,9 +1170,10 @@ Single-node acceptable for small self-host; split API/worker processes even on o
 
 ### Phase 4 — Payment adapters + webhooks
 
-- **Deliverables:** PaymentProvider port, Mock, webhook ingest, disposition model
+- **Deliverables:** Real provider adapter integrations (when authorized), production webhook ingest, disposition/PaymentAttempt wiring beyond Mock
+- **Does not redefine** the PaymentProvider port (owned since Phase 2)
 - **Invariants:** timeout≠failed; provider≠transaction state
-- **Exit:** e2e mock payment uncertainty tests
+- **Exit:** e2e payment uncertainty tests (Mock remains; real providers as authorized)
 
 ### Phase 5 — Financial primitives (fee/ledger foundations)
 
@@ -1015,13 +1229,23 @@ Initial TX4 production OSS cut is architecture-complete only when evidence shows
 
 ## 33. OPEN vs IA-FROZEN Summary
 
-### IA-FROZEN by this specification (pending AUDIT-021)
+### IA-FROZEN by this specification (pending AUDIT-022)
 
-- Tokio, Axum, PostgreSQL, SQLx, Serde, tracing+OTel-compatible, REST+OpenAPI, SQLx migrations, Docker packaging, transactional outbox+worker, hybrid relational persistence (not event sourcing), `FOR UPDATE`+version concurrency, durable idempotency table, Money as `i64` atomic + string JSON
+- Tokio, Axum, PostgreSQL, SQLx, Serde, tracing+OTel-compatible, REST+OpenAPI, SQLx migrations, Docker packaging
+- Hybrid relational persistence with explicit **mutable operational** vs **append-only evidence/financial** taxonomy (not event sourcing)
+- `FOR UPDATE` + version concurrency; global lock order; bounded deadlock/serialization retry
+- Durable idempotency reservation protocol with lease/reclaim
+- Outbox/job lifecycle `PENDING|RUNNING|SUCCEEDED|DEAD_LETTER` with lease reclaim
+- `UNIQUE (tenant_id, operation_id)` (and idempotency key uniqueness)
+- PaymentAttempt durable protocol (create before provider I/O)
+- Money: authoritative `i64` + checked `i128` intermediates; string JSON amounts; no float authority
+- Minimal deployment operational contract (migrate-before-ready, readiness/liveness, graceful shutdown, reconnect)
 
 ### Remain OPEN
 
-- Cloud vendor, K8s, brokers, auth IdP product, hosted OTel backend, exact routes/fields, pricing, payment provider canon, FX provider, refund product details, numeric retention TTLs, attempt-budget defaults, multi-region, dogfood architectures, SDK languages beyond eventual TS-first intent (SDK implementation **OPEN**)
+- Cloud vendor, K8s, brokers, auth IdP product, hosted OTel backend, exact routes/fields, pricing, payment provider canon, FX provider, refund product details, numeric retention TTLs / lease durations / retry bounds / attempt-budget defaults, multi-region, dogfood architectures, SDK languages beyond eventual TS-first intent (SDK implementation **OPEN**)
+- **Ledger posting convention** (debit/credit vs signed) — OPEN until before Phase 5 (§14.3)
+- Arbitrary big-int money intermediates — out of initial scope
 
 ---
 
@@ -1034,7 +1258,7 @@ Initial TX4 production OSS cut is architecture-complete only when evidence shows
 | ADR-003 | Compatible — selections are permissive-ecosystem; concrete crate license review at add-time |
 | ADR-004 SoT | Compatible — Postgres is technology; authorities unchanged |
 | ADR-005 | Compatible — `/v1` REST |
-| ADR-006 | Compatible — integer atomic + string JSON; half-even; allocation |
+| ADR-006 | Compatible — integer atomic + string JSON; half-even; allocation; i128 intermediates |
 | ADR-007 | Compatible — matrix/precedence/uncertainty implemented, not replaced |
 | ADR-008 | Compatible — OSS independent; Cloud separated |
 
@@ -1042,7 +1266,7 @@ Initial TX4 production OSS cut is architecture-complete only when evidence shows
 
 ---
 
-## 35. Explicit Non-Actions of TASK-018
+## 35. Explicit Non-Actions
 
 This document does **not**:
 
@@ -1050,7 +1274,9 @@ This document does **not**:
 - add `src/`, `crates/`, migrations, or dependencies
 - authorize coding
 
-Next gate: **AUDIT-021** (independent audit of this specification).
+TASK-018R remediates AUDIT-021 findings in this file only.
+
+Next gate: **AUDIT-022** (re-audit after remediation).
 
 ---
 
@@ -1059,3 +1285,4 @@ Next gate: **AUDIT-021** (independent audit of this specification).
 | Date | Event |
 | --- | --- |
 | 2026-09-25 | TASK-018 created PROPOSED implementation architecture |
+| 2026-09-25 | TASK-018R remediated AUDIT-021 findings (persistence taxonomy, idempotency/outbox leases, money intermediates, locks, PaymentAttempt, ops contract) |
