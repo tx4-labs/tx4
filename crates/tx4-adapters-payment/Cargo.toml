@@ -1,0 +1,11 @@
+[package]
+name = "tx4-adapters-payment"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "TX4 payment provider adapter boundary (no provider SDKs in Phase-1A)"
+
+[dependencies]
+tx4-application = { workspace = true }
+tx4-domain = { workspace = true }

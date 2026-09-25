@@ -1,0 +1,9 @@
+[package]
+name = "tx4-domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "TX4 domain primitives and invariants (innermost crate)"
+
+[dependencies]

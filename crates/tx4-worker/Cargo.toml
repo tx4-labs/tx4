@@ -1,0 +1,10 @@
+[package]
+name = "tx4-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "TX4 worker / outbox processing library boundary"
+
+[dependencies]
+tx4-application = { workspace = true }

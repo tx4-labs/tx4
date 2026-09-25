@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tx4-domain",
+    "crates/tx4-application",
+    "crates/tx4-persistence",
+    "crates/tx4-api",
+    "crates/tx4-adapters-payment",
+    "crates/tx4-worker",
+    "crates/tx4-observability",
+    "crates/tx4-config",
+    "apps/tx4-server",
+    "apps/tx4-worker",
+    "apps/tx4-cli",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+tx4-domain = { path = "crates/tx4-domain" }
+tx4-application = { path = "crates/tx4-application" }
+tx4-persistence = { path = "crates/tx4-persistence" }
+tx4-api = { path = "crates/tx4-api" }
+tx4-adapters-payment = { path = "crates/tx4-adapters-payment" }
+tx4-worker = { path = "crates/tx4-worker" }
+tx4-observability = { path = "crates/tx4-observability" }
+tx4-config = { path = "crates/tx4-config" }

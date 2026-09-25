@@ -1,0 +1,16 @@
+[package]
+name = "tx4-worker-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "TX4 worker application binary (bootstrap only in Phase-1A)"
+
+[[bin]]
+name = "tx4-worker"
+path = "src/main.rs"
+
+[dependencies]
+tx4-worker = { workspace = true }
+tx4-config = { workspace = true }
+tx4-observability = { workspace = true }

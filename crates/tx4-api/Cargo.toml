@@ -1,0 +1,10 @@
+[package]
+name = "tx4-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "TX4 HTTP API boundary (Axum — later phases)"
+
+[dependencies]
+tx4-application = { workspace = true }

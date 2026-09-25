@@ -1,0 +1,10 @@
+[package]
+name = "tx4-application"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "TX4 application use-case boundary and infrastructure ports"
+
+[dependencies]
+tx4-domain = { workspace = true }

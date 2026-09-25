@@ -1,0 +1,11 @@
+[package]
+name = "tx4-persistence"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "TX4 persistence adapters (PostgreSQL/SQLx — later phases)"
+
+[dependencies]
+tx4-application = { workspace = true }
+tx4-domain = { workspace = true }
