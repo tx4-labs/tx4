@@ -10,6 +10,7 @@
 
 mod fields;
 mod init;
+mod lifecycle;
 mod otel;
 mod redact;
 
@@ -17,6 +18,7 @@ pub use fields::{
     CORRELATION_ID, OPERATION_ID, PROVIDER_ID, REQUEST_ID, TENANT_ID, TRANSACTION_ID,
 };
 pub use init::{init, ObservabilityGuard};
+pub use lifecycle::wait_for_shutdown_signal;
 pub use otel::{OtelExportInterface, OtelExportPlan};
 pub use redact::{is_forbidden_log_key, redact_value, FORBIDDEN_LOG_KEYS};
 

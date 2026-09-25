@@ -11,7 +11,10 @@ name = "tx4-server"
 path = "src/main.rs"
 
 [dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true }
 tx4-api = { workspace = true }
 tx4-config = { workspace = true }
 tx4-observability = { workspace = true }
+tx4-persistence = { workspace = true }

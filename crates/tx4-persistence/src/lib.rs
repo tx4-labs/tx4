@@ -11,7 +11,7 @@ mod migrate;
 mod pool;
 
 pub use error::PersistenceError;
-pub use health::check_connectivity;
+pub use health::{check_connectivity, check_schema_foundation};
 pub use migrate::run_migrations;
 pub use pool::{close_pool, connect_pool};
 
