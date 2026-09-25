@@ -34,5 +34,6 @@ mod tests {
         let dir = migrations_dir();
         assert!(dir.ends_with("migrations"));
         assert!(dir.join("0001_schema_foundation.sql").is_file());
+        assert!(dir.join("0002_transactions.sql").is_file());
     }
 }

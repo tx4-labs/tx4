@@ -1,7 +1,8 @@
 //! TX4 persistence adapters (PostgreSQL / SQLx).
 //!
 //! Phase-1C: connection pool, migration runner, and connectivity health.
-//! No business repositories or business schema.
+//! Phase-2A: transaction aggregate schema foundation (`tx4_infra.transactions`).
+//! No business repositories, idempotency, outbox, or PaymentAttempt logic yet.
 
 #![forbid(unsafe_code)]
 

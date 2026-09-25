@@ -52,7 +52,7 @@ async fn migrate_twice_is_idempotent_and_health_ok() {
         .await
         .expect("SELECT 1 health check should succeed");
 
-    // Foundation marker schema must exist; business tables must not.
+    // Foundation marker schema must exist.
     let schema_exists: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'tx4_infra')",
     )
@@ -61,8 +61,9 @@ async fn migrate_twice_is_idempotent_and_health_ok() {
     .expect("schema existence query");
     assert!(schema_exists);
 
+    // Phase-2A authorizes tx4_infra.transactions only among business aggregates.
+    // Later Phase-2 tables (idempotency/outbox/PaymentAttempt/…) remain absent here.
     for forbidden in [
-        "transactions",
         "payments",
         "payment_attempts",
         "idempotency_records",
@@ -71,14 +72,23 @@ async fn migrate_twice_is_idempotent_and_health_ok() {
         "settlements",
         "reconciliation_records",
     ] {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)",
-        )
-        .bind(forbidden)
-        .fetch_one(&pool)
-        .await
-        .expect("table existence query");
-        assert!(!exists, "forbidden business table present: {forbidden}");
+        for schema in ["public", "tx4_infra"] {
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = $1 AND table_name = $2
+                 )",
+            )
+            .bind(schema)
+            .bind(forbidden)
+            .fetch_one(&pool)
+            .await
+            .expect("table existence query");
+            assert!(
+                !exists,
+                "forbidden business table present: {schema}.{forbidden}"
+            );
+        }
     }
 
     close_pool(&pool).await;
