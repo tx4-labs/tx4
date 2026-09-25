@@ -60,16 +60,23 @@ jobs:
       - name: Reject unauthorized implementation directories
         run: |
           set -euo pipefail
-          # TASK-001 / foundation policy: no core implementation trees yet.
+          # Phase-1A / FREEZE-012: crates/ and apps/ are authorized workspace roots.
+          # Continue rejecting unrelated foundation-era implementation trees.
+          authorized=(
+            crates
+            apps
+          )
           forbidden=(
             src
-            crates
             migrations
             sdk
             adapters
             deploy
             terraform
           )
+          for path in "${authorized[@]}"; do
+            echo "AUTHORIZED WORKSPACE ROOT (when present): $path"
+          done
           found=0
           for path in "${forbidden[@]}"; do
             if [[ -e "$path" ]]; then
@@ -78,7 +85,7 @@ jobs:
             fi
           done
           if [[ "$found" -ne 0 ]]; then
-            echo "Implementation directories are not authorized at the foundation stage."
+            echo "Unauthorized implementation directories detected."
             exit 1
           fi
 
