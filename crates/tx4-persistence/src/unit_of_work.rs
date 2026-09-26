@@ -287,6 +287,12 @@ pub(crate) async fn begin_or_recover_tx(
                 return Ok(IdempotencyBeginOutcome::InProgress(current));
             }
 
+            // Lock order (deterministic): idempotency_records (already held) → payment_attempts.
+            // FOR UPDATE closes READ COMMITTED TOCTOU vs concurrent mark_submitted/outcomes.
+            let locked_attempt =
+                find_attempt_by_operation_for_update_on(tx, tenant_id, &current.operation_id)
+                    .await?;
+
             let updated = sqlx::query_as::<_, IdempotencyRow>(&format!(
                 "UPDATE tx4_infra.idempotency_records SET
                     lease_owner = $3,
@@ -305,10 +311,8 @@ pub(crate) async fn begin_or_recover_tx(
             .map_err(map_sqlx_err)?;
             let reservation = idemp_row_to_domain(updated)?;
 
-            // IA §9.2(7)/§12.4.2: inspect bound PaymentAttempt before authorizing provider I/O.
-            if let Some(attempt) =
-                find_attempt_by_operation_on(tx, tenant_id, &reservation.operation_id).await?
-            {
+            // IA §9.2(7)/§12.4.2: decide from the locked PaymentAttempt observation only.
+            if let Some(attempt) = locked_attempt {
                 if attempt.status.requires_reconcile_before_provider_io() {
                     return Ok(IdempotencyBeginOutcome::ReclaimedRequiresReconcile {
                         reservation,
@@ -460,9 +464,28 @@ pub(crate) async fn find_attempt_by_operation_on(
     tenant_id: &TenantId,
     operation_id: &OperationId,
 ) -> Result<Option<PaymentAttempt>, ApplicationError> {
+    find_attempt_by_operation_locked(tx, tenant_id, operation_id, false).await
+}
+
+/// Lock the bound PaymentAttempt row for reclaim authorization (same TX as idempotency FOR UPDATE).
+pub(crate) async fn find_attempt_by_operation_for_update_on(
+    tx: &mut Transaction<'_, Postgres>,
+    tenant_id: &TenantId,
+    operation_id: &OperationId,
+) -> Result<Option<PaymentAttempt>, ApplicationError> {
+    find_attempt_by_operation_locked(tx, tenant_id, operation_id, true).await
+}
+
+async fn find_attempt_by_operation_locked(
+    tx: &mut Transaction<'_, Postgres>,
+    tenant_id: &TenantId,
+    operation_id: &OperationId,
+    for_update: bool,
+) -> Result<Option<PaymentAttempt>, ApplicationError> {
+    let lock = if for_update { " FOR UPDATE" } else { "" };
     let row = sqlx::query_as::<_, AttemptRow>(&format!(
         "SELECT {cols} FROM tx4_infra.payment_attempts
-         WHERE tenant_id = $1 AND operation_id = $2",
+         WHERE tenant_id = $1 AND operation_id = $2{lock}",
         cols = attempt_select_cols()
     ))
     .bind(tenant_id.as_str())

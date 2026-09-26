@@ -1075,3 +1075,474 @@ async fn unit_of_work_atomicity_and_reclaim_gates() {
 
     close_pool(&pool).await;
 }
+
+/// Deterministic TOCTOU proof: concurrent PaymentAttempt transition cannot slip between
+/// reclaim observation and authorization when the attempt row is locked FOR UPDATE.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL against a real PostgreSQL database"]
+async fn reclaim_toctou_sees_committed_attempt_transition() {
+    let Some(config) = test_config_from_env() else {
+        panic!("DATABASE_URL must be set for ignored PostgreSQL integration tests");
+    };
+    let pool = connect_pool(&config).await.expect("connect");
+    run_migrations(&pool).await.expect("migrate");
+    sqlx::query(
+        "TRUNCATE TABLE
+            tx4_infra.payment_attempts,
+            tx4_infra.idempotency_records,
+            tx4_infra.outbox_jobs,
+            tx4_infra.transactions
+         RESTART IDENTITY CASCADE",
+    )
+    .execute(&pool)
+    .await
+    .expect("truncate");
+
+    let idemp = Arc::new(PgIdempotencyRepository::new(pool.clone()));
+    let attempts = PgPaymentAttemptRepository::new(pool.clone());
+    let tx_repo = PgTransactionRepository::new(pool.clone());
+
+    let tenant = TenantId::new("tenant-toctou").unwrap();
+    let tx_id = TransactionId::new("tx-toctou").unwrap();
+    tx_repo
+        .insert(
+            &Transaction::new_created(
+                tx_id.clone(),
+                tenant.clone(),
+                Some(Money::new(100, CurrencyId::new("IDR").unwrap())),
+                None,
+                None,
+                1_000_000,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // --- Case 1: PREPARED → SUBMITTED while reclaim is in flight ---
+    {
+        let key = "toctou-sub";
+        let op = OperationId::new("op-toctou-sub").unwrap();
+        let attempt_id = "att-toctou-sub";
+        let t0 = 200_000_000i64;
+        idemp
+            .begin_or_recover(&begin_req(
+                &tenant,
+                key,
+                &op,
+                "fp-t",
+                Some(&tx_id),
+                "owner-old",
+                1,
+                t0,
+            ))
+            .await
+            .unwrap();
+        attempts
+            .insert_prepared(
+                &PaymentAttempt {
+                    attempt_id: attempt_id.into(),
+                    tenant_id: tenant.clone(),
+                    transaction_id: tx_id.clone(),
+                    operation_id: op.clone(),
+                    idempotency_key: Some(key.into()),
+                    provider_adapter: "mock".into(),
+                    provider_ref: None,
+                    provider_idempotency_key: None,
+                    status: PaymentAttemptStatus::Prepared,
+                    outcome_disposition: None,
+                    amount_atomic: Some(1),
+                    currency_id: Some("IDR".into()),
+                },
+                t0 + 1,
+            )
+            .await
+            .unwrap();
+
+        // Peer holds the PaymentAttempt row so reclaim's FOR UPDATE must wait.
+        let mut peer = pool.begin().await.expect("peer begin");
+        let held: String = sqlx::query_scalar(
+            "SELECT status FROM tx4_infra.payment_attempts
+             WHERE tenant_id = $1 AND attempt_id = $2
+             FOR UPDATE",
+        )
+        .bind(tenant.as_str())
+        .bind(attempt_id)
+        .fetch_one(&mut *peer)
+        .await
+        .unwrap();
+        assert_eq!(held, "PREPARED");
+
+        let idemp_r = idemp.clone();
+        let tenant_r = tenant.clone();
+        let op_r = op.clone();
+        let tx_id_r = tx_id.clone();
+        let reclaim = tokio::spawn(async move {
+            idemp_r
+                .begin_or_recover(&begin_req(
+                    &tenant_r,
+                    key,
+                    &op_r,
+                    "fp-t",
+                    Some(&tx_id_r),
+                    "owner-reclaim",
+                    DEFAULT_LEASE_SECS,
+                    t0 + 2_000_000,
+                ))
+                .await
+        });
+
+        wait_for_ungranted_lock(&pool).await;
+
+        // Concurrent transition commits while reclaim is blocked on the attempt lock.
+        sqlx::query(
+            "UPDATE tx4_infra.payment_attempts SET
+                status = 'SUBMITTED',
+                provider_idempotency_key = 'pik-toctou-sub',
+                updated_at = TIMESTAMPTZ 'epoch' + ((201000003::bigint) * INTERVAL '1 microsecond')
+             WHERE tenant_id = $1 AND attempt_id = $2 AND status = 'PREPARED'",
+        )
+        .bind(tenant.as_str())
+        .bind(attempt_id)
+        .execute(&mut *peer)
+        .await
+        .unwrap();
+        peer.commit().await.unwrap();
+
+        let outcome = reclaim.await.unwrap().unwrap();
+        match outcome {
+            IdempotencyBeginOutcome::ReclaimedRequiresReconcile { attempt, .. } => {
+                assert_eq!(attempt.status, PaymentAttemptStatus::Submitted);
+            }
+            other => panic!("expected reconcile-first after SUBMITTED, got {other:?}"),
+        }
+    }
+
+    // --- Case 2: SUBMITTED → SUCCEEDED while reclaim is in flight ---
+    {
+        let key = "toctou-ok";
+        let op = OperationId::new("op-toctou-ok").unwrap();
+        let attempt_id = "att-toctou-ok";
+        let t0 = 210_000_000i64;
+        idemp
+            .begin_or_recover(&begin_req(
+                &tenant,
+                key,
+                &op,
+                "fp-t2",
+                Some(&tx_id),
+                "owner-old",
+                1,
+                t0,
+            ))
+            .await
+            .unwrap();
+        attempts
+            .insert_prepared(
+                &PaymentAttempt {
+                    attempt_id: attempt_id.into(),
+                    tenant_id: tenant.clone(),
+                    transaction_id: tx_id.clone(),
+                    operation_id: op.clone(),
+                    idempotency_key: Some(key.into()),
+                    provider_adapter: "mock".into(),
+                    provider_ref: None,
+                    provider_idempotency_key: None,
+                    status: PaymentAttemptStatus::Prepared,
+                    outcome_disposition: None,
+                    amount_atomic: Some(2),
+                    currency_id: Some("IDR".into()),
+                },
+                t0 + 1,
+            )
+            .await
+            .unwrap();
+        attempts
+            .mark_submitted(&tenant, attempt_id, "pik-toctou-ok", t0 + 2)
+            .await
+            .unwrap();
+
+        let mut peer = pool.begin().await.expect("peer begin");
+        let held: String = sqlx::query_scalar(
+            "SELECT status FROM tx4_infra.payment_attempts
+             WHERE tenant_id = $1 AND attempt_id = $2
+             FOR UPDATE",
+        )
+        .bind(tenant.as_str())
+        .bind(attempt_id)
+        .fetch_one(&mut *peer)
+        .await
+        .unwrap();
+        assert_eq!(held, "SUBMITTED");
+
+        let idemp_r = idemp.clone();
+        let tenant_r = tenant.clone();
+        let op_r = op.clone();
+        let tx_id_r = tx_id.clone();
+        let reclaim = tokio::spawn(async move {
+            idemp_r
+                .begin_or_recover(&begin_req(
+                    &tenant_r,
+                    key,
+                    &op_r,
+                    "fp-t2",
+                    Some(&tx_id_r),
+                    "owner-reclaim",
+                    DEFAULT_LEASE_SECS,
+                    t0 + 2_000_000,
+                ))
+                .await
+        });
+
+        wait_for_ungranted_lock(&pool).await;
+
+        sqlx::query(
+            "UPDATE tx4_infra.payment_attempts SET
+                status = 'SUCCEEDED',
+                outcome_disposition = 'SUCCEEDED',
+                provider_ref = 'pref-toctou',
+                updated_at = TIMESTAMPTZ 'epoch' + ((211000003::bigint) * INTERVAL '1 microsecond')
+             WHERE tenant_id = $1 AND attempt_id = $2 AND status IN ('SUBMITTED', 'UNKNOWN')",
+        )
+        .bind(tenant.as_str())
+        .bind(attempt_id)
+        .execute(&mut *peer)
+        .await
+        .unwrap();
+        peer.commit().await.unwrap();
+
+        let outcome = reclaim.await.unwrap().unwrap();
+        match outcome {
+            IdempotencyBeginOutcome::ReclaimedRequiresReconcile { attempt, .. } => {
+                assert_eq!(attempt.status, PaymentAttemptStatus::Succeeded);
+            }
+            other => panic!("expected reconcile-first after SUCCEEDED, got {other:?}"),
+        }
+    }
+
+    // --- Case 3: SUBMITTED → FAILED while reclaim is in flight ---
+    {
+        let key = "toctou-fail";
+        let op = OperationId::new("op-toctou-fail").unwrap();
+        let attempt_id = "att-toctou-fail";
+        let t0 = 220_000_000i64;
+        idemp
+            .begin_or_recover(&begin_req(
+                &tenant,
+                key,
+                &op,
+                "fp-t3",
+                Some(&tx_id),
+                "owner-old",
+                1,
+                t0,
+            ))
+            .await
+            .unwrap();
+        attempts
+            .insert_prepared(
+                &PaymentAttempt {
+                    attempt_id: attempt_id.into(),
+                    tenant_id: tenant.clone(),
+                    transaction_id: tx_id.clone(),
+                    operation_id: op.clone(),
+                    idempotency_key: Some(key.into()),
+                    provider_adapter: "mock".into(),
+                    provider_ref: None,
+                    provider_idempotency_key: None,
+                    status: PaymentAttemptStatus::Prepared,
+                    outcome_disposition: None,
+                    amount_atomic: Some(3),
+                    currency_id: Some("IDR".into()),
+                },
+                t0 + 1,
+            )
+            .await
+            .unwrap();
+        attempts
+            .mark_submitted(&tenant, attempt_id, "pik-toctou-fail", t0 + 2)
+            .await
+            .unwrap();
+
+        let mut peer = pool.begin().await.expect("peer begin");
+        sqlx::query_scalar::<_, String>(
+            "SELECT status FROM tx4_infra.payment_attempts
+             WHERE tenant_id = $1 AND attempt_id = $2
+             FOR UPDATE",
+        )
+        .bind(tenant.as_str())
+        .bind(attempt_id)
+        .fetch_one(&mut *peer)
+        .await
+        .unwrap();
+
+        let idemp_r = idemp.clone();
+        let tenant_r = tenant.clone();
+        let op_r = op.clone();
+        let tx_id_r = tx_id.clone();
+        let reclaim = tokio::spawn(async move {
+            idemp_r
+                .begin_or_recover(&begin_req(
+                    &tenant_r,
+                    key,
+                    &op_r,
+                    "fp-t3",
+                    Some(&tx_id_r),
+                    "owner-reclaim",
+                    DEFAULT_LEASE_SECS,
+                    t0 + 2_000_000,
+                ))
+                .await
+        });
+
+        wait_for_ungranted_lock(&pool).await;
+
+        sqlx::query(
+            "UPDATE tx4_infra.payment_attempts SET
+                status = 'FAILED',
+                outcome_disposition = 'DECLINED',
+                updated_at = TIMESTAMPTZ 'epoch' + ((221000003::bigint) * INTERVAL '1 microsecond')
+             WHERE tenant_id = $1 AND attempt_id = $2 AND status IN ('SUBMITTED', 'UNKNOWN')",
+        )
+        .bind(tenant.as_str())
+        .bind(attempt_id)
+        .execute(&mut *peer)
+        .await
+        .unwrap();
+        peer.commit().await.unwrap();
+
+        let outcome = reclaim.await.unwrap().unwrap();
+        match outcome {
+            IdempotencyBeginOutcome::ReclaimedRequiresReconcile { attempt, .. } => {
+                assert_eq!(attempt.status, PaymentAttemptStatus::Failed);
+            }
+            other => panic!("expected reconcile-first after FAILED, got {other:?}"),
+        }
+    }
+
+    // --- Case 4: PREPARED → UNKNOWN (via SUBMITTED intermediate held then UNKNOWN) ---
+    {
+        let key = "toctou-unk";
+        let op = OperationId::new("op-toctou-unk").unwrap();
+        let attempt_id = "att-toctou-unk";
+        let t0 = 230_000_000i64;
+        idemp
+            .begin_or_recover(&begin_req(
+                &tenant,
+                key,
+                &op,
+                "fp-t4",
+                Some(&tx_id),
+                "owner-old",
+                1,
+                t0,
+            ))
+            .await
+            .unwrap();
+        attempts
+            .insert_prepared(
+                &PaymentAttempt {
+                    attempt_id: attempt_id.into(),
+                    tenant_id: tenant.clone(),
+                    transaction_id: tx_id.clone(),
+                    operation_id: op.clone(),
+                    idempotency_key: Some(key.into()),
+                    provider_adapter: "mock".into(),
+                    provider_ref: None,
+                    provider_idempotency_key: None,
+                    status: PaymentAttemptStatus::Prepared,
+                    outcome_disposition: None,
+                    amount_atomic: Some(4),
+                    currency_id: Some("IDR".into()),
+                },
+                t0 + 1,
+            )
+            .await
+            .unwrap();
+
+        let mut peer = pool.begin().await.expect("peer begin");
+        sqlx::query_scalar::<_, String>(
+            "SELECT status FROM tx4_infra.payment_attempts
+             WHERE tenant_id = $1 AND attempt_id = $2
+             FOR UPDATE",
+        )
+        .bind(tenant.as_str())
+        .bind(attempt_id)
+        .fetch_one(&mut *peer)
+        .await
+        .unwrap();
+
+        let idemp_r = idemp.clone();
+        let tenant_r = tenant.clone();
+        let op_r = op.clone();
+        let tx_id_r = tx_id.clone();
+        let reclaim = tokio::spawn(async move {
+            idemp_r
+                .begin_or_recover(&begin_req(
+                    &tenant_r,
+                    key,
+                    &op_r,
+                    "fp-t4",
+                    Some(&tx_id_r),
+                    "owner-reclaim",
+                    DEFAULT_LEASE_SECS,
+                    t0 + 2_000_000,
+                ))
+                .await
+        });
+
+        wait_for_ungranted_lock(&pool).await;
+
+        // Peer advances PREPARED → SUBMITTED → UNKNOWN before releasing the lock.
+        sqlx::query(
+            "UPDATE tx4_infra.payment_attempts SET
+                status = 'SUBMITTED',
+                provider_idempotency_key = 'pik-toctou-unk',
+                updated_at = TIMESTAMPTZ 'epoch' + ((231000002::bigint) * INTERVAL '1 microsecond')
+             WHERE tenant_id = $1 AND attempt_id = $2 AND status = 'PREPARED'",
+        )
+        .bind(tenant.as_str())
+        .bind(attempt_id)
+        .execute(&mut *peer)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE tx4_infra.payment_attempts SET
+                status = 'UNKNOWN',
+                outcome_disposition = 'TIMEOUT',
+                updated_at = TIMESTAMPTZ 'epoch' + ((231000003::bigint) * INTERVAL '1 microsecond')
+             WHERE tenant_id = $1 AND attempt_id = $2 AND status IN ('SUBMITTED', 'UNKNOWN')",
+        )
+        .bind(tenant.as_str())
+        .bind(attempt_id)
+        .execute(&mut *peer)
+        .await
+        .unwrap();
+        peer.commit().await.unwrap();
+
+        let outcome = reclaim.await.unwrap().unwrap();
+        match outcome {
+            IdempotencyBeginOutcome::ReclaimedRequiresReconcile { attempt, .. } => {
+                assert_eq!(attempt.status, PaymentAttemptStatus::Unknown);
+            }
+            other => panic!("expected reconcile-first after UNKNOWN, got {other:?}"),
+        }
+    }
+
+    close_pool(&pool).await;
+}
+
+async fn wait_for_ungranted_lock(pool: &sqlx::PgPool) {
+    for _ in 0..1_000 {
+        let waiting: i64 =
+            sqlx::query_scalar("SELECT COUNT(*)::bigint FROM pg_locks WHERE NOT granted")
+                .fetch_one(pool)
+                .await
+                .expect("pg_locks");
+        if waiting > 0 {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    panic!("reclaim never blocked waiting for PaymentAttempt row lock");
+}
