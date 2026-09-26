@@ -16,6 +16,7 @@ mod payment_attempt_repo;
 mod pool;
 mod sql_support;
 mod transaction_repo;
+mod unit_of_work;
 
 pub use error::PersistenceError;
 pub use health::{check_connectivity, check_schema_foundation};
@@ -29,6 +30,7 @@ pub use sql_support::{
     DEFAULT_OUTBOX_MAX_ATTEMPTS,
 };
 pub use transaction_repo::PgTransactionRepository;
+pub use unit_of_work::{PgUnitOfWork, PgUnitOfWorkFactory};
 
 pub use sqlx::PgPool;
 

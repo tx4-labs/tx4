@@ -13,10 +13,11 @@ pub mod ports;
 pub use context::RequestContext;
 pub use error::ApplicationError;
 pub use ports::{
-    ClaimedOutboxJob, IdempotencyBeginOutcome, IdempotencyBeginRequest, IdempotencyRepository,
-    IdempotencyReservation, IdempotencyStatus, OutboxJob, OutboxRepository, OutboxStatus,
-    PaymentAttempt, PaymentAttemptRepository, PaymentAttemptStatus, PaymentIntent, PaymentProvider,
-    ProviderObservation, ProviderRef, TransactionRepository,
+    ClaimedOutboxJob, IdempotencyBeginOutcome, IdempotencyBeginRequest, IdempotencyFinalize,
+    IdempotencyRepository, IdempotencyReservation, IdempotencyStatus, OutboxJob, OutboxRepository,
+    OutboxStatus, PaymentAttempt, PaymentAttemptRepository, PaymentAttemptStatus, PaymentIntent,
+    PaymentProvider, ProviderObservation, ProviderRef, TransactionRepository, UnitOfWork,
+    UnitOfWorkFactory,
 };
 pub use tx4_domain;
 

@@ -67,3 +67,11 @@ pub fn outbox_next_attempt_unix_micros(
         .checked_add(delay_secs.saturating_mul(1_000_000))
         .ok_or_else(|| ApplicationError::permanent_internal("outbox backoff overflow"))
 }
+
+/// Integer-safe TIMESTAMPTZ → unix-microseconds projection (no binary float intermediate).
+///
+/// Uses `EXTRACT(EPOCH)::numeric * 1000000` rather than `EXTRACT(EPOCH) * 1e6` /
+/// double-precision scaling before the bigint cast.
+pub(crate) fn ts_unix_micros_expr(column: &str) -> String {
+    format!("((EXTRACT(EPOCH FROM {column})::numeric) * 1000000)::bigint")
+}

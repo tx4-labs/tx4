@@ -136,11 +136,17 @@ where
     }
 }
 
-const SELECT_COLS: &str = "id, tenant_id, job_type, payload, status, locked_by, claim_epoch,
-    (EXTRACT(EPOCH FROM lease_expires_at) * 1000000)::bigint AS lease_expires_at_unix_micros,
+fn select_cols() -> String {
+    format!(
+        "id, tenant_id, job_type, payload, status, locked_by, claim_epoch,
+    {lease} AS lease_expires_at_unix_micros,
     attempt_count,
-    (EXTRACT(EPOCH FROM next_attempt_at) * 1000000)::bigint AS next_attempt_at_unix_micros,
-    last_error";
+    {next} AS next_attempt_at_unix_micros,
+    last_error",
+        lease = crate::sql_support::ts_unix_micros_expr("lease_expires_at"),
+        next = crate::sql_support::ts_unix_micros_expr("next_attempt_at"),
+    )
+}
 
 #[derive(Debug, sqlx::FromRow)]
 struct OutboxRow {
@@ -227,6 +233,7 @@ async fn claim_once(
         .checked_add(lease_duration_secs.saturating_mul(1_000_000))
         .ok_or_else(|| ApplicationError::permanent_internal("outbox lease overflow"))?;
 
+    let cols = select_cols();
     let mut db_tx = pool.begin().await.map_err(map_sqlx_err)?;
     let rows = sqlx::query_as::<_, OutboxRow>(&format!(
         "UPDATE tx4_infra.outbox_jobs AS o SET
@@ -244,7 +251,7 @@ async fn claim_once(
             FOR UPDATE SKIP LOCKED
             LIMIT $4
          )
-         RETURNING {SELECT_COLS}"
+         RETURNING {cols}"
     ))
     .bind(worker_id)
     .bind(lease_expires)
@@ -307,8 +314,9 @@ async fn complete_once(
 }
 
 async fn find_once(pool: &PgPool, job_id: &str) -> Result<Option<OutboxJob>, ApplicationError> {
+    let cols = select_cols();
     let row = sqlx::query_as::<_, OutboxRow>(&format!(
-        "SELECT {SELECT_COLS} FROM tx4_infra.outbox_jobs WHERE id = $1"
+        "SELECT {cols} FROM tx4_infra.outbox_jobs WHERE id = $1"
     ))
     .bind(job_id)
     .fetch_optional(pool)

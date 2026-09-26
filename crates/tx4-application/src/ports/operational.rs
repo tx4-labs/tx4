@@ -55,12 +55,17 @@ pub struct IdempotencyReservation {
 /// Outcome of begin/reclaim against an idempotency key.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IdempotencyBeginOutcome {
-    /// Caller holds the lease and may execute the command.
+    /// Caller holds the lease and may execute the command (no post-submit attempt gate).
     Acquired(IdempotencyReservation),
     /// Active lease held by another executor; do not execute.
     InProgress(IdempotencyReservation),
     /// Finalized reservation; replay stored response (no new financial effect).
     Replay(IdempotencyReservation),
+    /// Expired lease reclaimed, but bound PaymentAttempt forbids blind provider I/O (IA §9.2(7)).
+    ReclaimedRequiresReconcile {
+        reservation: IdempotencyReservation,
+        attempt: Box<PaymentAttempt>,
+    },
 }
 
 /// Inputs for beginning or reclaiming an idempotency reservation.

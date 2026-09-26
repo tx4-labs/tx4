@@ -3,6 +3,7 @@
 pub mod operational;
 pub mod payment;
 pub mod persistence;
+pub mod unit_of_work;
 
 pub use operational::{
     ClaimedOutboxJob, IdempotencyBeginOutcome, IdempotencyBeginRequest, IdempotencyRepository,
@@ -11,3 +12,4 @@ pub use operational::{
 };
 pub use payment::{PaymentIntent, PaymentProvider, ProviderObservation, ProviderRef};
 pub use persistence::TransactionRepository;
+pub use unit_of_work::{IdempotencyFinalize, UnitOfWork, UnitOfWorkFactory};

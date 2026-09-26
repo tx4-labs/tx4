@@ -21,6 +21,15 @@ struct MockState {
     /// Stable refs keyed by provider_idempotency_key (deterministic reuse).
     by_idempotency: HashMap<String, ProviderRef>,
     status: HashMap<String, ProviderObservation>,
+    create_calls: u64,
+}
+
+fn lock_state(
+    inner: &Mutex<MockState>,
+) -> Result<std::sync::MutexGuard<'_, MockState>, ApplicationError> {
+    inner
+        .lock()
+        .map_err(|_| ApplicationError::permanent_internal("mock payment provider mutex poisoned"))
 }
 
 /// In-memory Mock PaymentProvider — offline and deterministic.
@@ -36,13 +45,20 @@ impl MockPaymentProvider {
                 create_outcome: MockPaymentOutcome::Succeed,
                 by_idempotency: HashMap::new(),
                 status: HashMap::new(),
+                create_calls: 0,
             })),
         }
     }
 
-    pub fn set_create_outcome(&self, outcome: MockPaymentOutcome) {
-        let mut g = self.inner.lock().expect("mock lock");
+    pub fn set_create_outcome(&self, outcome: MockPaymentOutcome) -> Result<(), ApplicationError> {
+        let mut g = lock_state(&self.inner)?;
         g.create_outcome = outcome;
+        Ok(())
+    }
+
+    /// Number of `create_payment` invocations (including cache hits).
+    pub fn create_call_count(&self) -> Result<u64, ApplicationError> {
+        Ok(lock_state(&self.inner)?.create_calls)
     }
 }
 
@@ -57,7 +73,8 @@ impl PaymentProvider for MockPaymentProvider {
         &self,
         intent: &PaymentIntent,
     ) -> Result<ProviderRef, ApplicationError> {
-        let mut g = self.inner.lock().expect("mock lock");
+        let mut g = lock_state(&self.inner)?;
+        g.create_calls = g.create_calls.saturating_add(1);
         if let Some(existing) = g.by_idempotency.get(&intent.provider_idempotency_key) {
             return Ok(existing.clone());
         }
@@ -87,7 +104,7 @@ impl PaymentProvider for MockPaymentProvider {
     }
 
     async fn capture(&self, provider_ref: &ProviderRef) -> Result<(), ApplicationError> {
-        let g = self.inner.lock().expect("mock lock");
+        let g = lock_state(&self.inner)?;
         if !g.status.contains_key(provider_ref.as_str()) {
             return Err(ApplicationError::not_found("mock provider_ref unknown"));
         }
@@ -99,7 +116,7 @@ impl PaymentProvider for MockPaymentProvider {
         provider_ref: &ProviderRef,
         _money: &Money,
     ) -> Result<(), ApplicationError> {
-        let g = self.inner.lock().expect("mock lock");
+        let g = lock_state(&self.inner)?;
         if !g.status.contains_key(provider_ref.as_str()) {
             return Err(ApplicationError::not_found("mock provider_ref unknown"));
         }
@@ -110,7 +127,7 @@ impl PaymentProvider for MockPaymentProvider {
         &self,
         provider_ref: &ProviderRef,
     ) -> Result<ProviderObservation, ApplicationError> {
-        let g = self.inner.lock().expect("mock lock");
+        let g = lock_state(&self.inner)?;
         g.status
             .get(provider_ref.as_str())
             .cloned()

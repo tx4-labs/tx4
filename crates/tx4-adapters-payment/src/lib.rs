@@ -30,7 +30,8 @@ mod tests {
     #[tokio::test]
     async fn mock_is_deterministic_and_offline() {
         let mock = MockPaymentProvider::new();
-        mock.set_create_outcome(MockPaymentOutcome::Succeed);
+        mock.set_create_outcome(MockPaymentOutcome::Succeed)
+            .unwrap();
         let intent = PaymentIntent {
             amount: Money::new(100, CurrencyId::new("IDR").unwrap()),
             provider_idempotency_key: "pik-1".into(),
@@ -52,7 +53,8 @@ mod tests {
     #[tokio::test]
     async fn mock_can_simulate_uncertainty() {
         let mock = MockPaymentProvider::new();
-        mock.set_create_outcome(MockPaymentOutcome::UnknownTimeout);
+        mock.set_create_outcome(MockPaymentOutcome::UnknownTimeout)
+            .unwrap();
         let intent = PaymentIntent {
             amount: Money::new(50, CurrencyId::new("USD").unwrap()),
             provider_idempotency_key: "pik-u".into(),

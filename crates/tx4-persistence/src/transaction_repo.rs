@@ -141,7 +141,7 @@ async fn find_once(
     tenant_id: &TenantId,
     id: &TransactionId,
 ) -> Result<Option<Transaction>, ApplicationError> {
-    let row = sqlx::query_as::<_, TransactionRow>(LOAD_SQL)
+    let row = sqlx::query_as::<_, TransactionRow>(&load_sql())
         .bind(tenant_id.as_str())
         .bind(id.as_str())
         .fetch_optional(pool)
@@ -188,24 +188,38 @@ async fn apply_once(
     Ok(next)
 }
 
-const LOAD_SQL: &str = "SELECT
+fn load_sql() -> String {
+    format!(
+        "SELECT
     id, tenant_id, primary_state, version,
     amount_atomic, currency_id, attempt_budget,
-    (EXTRACT(EPOCH FROM expires_at) * 1000000)::bigint AS expires_at_unix_micros,
-    (EXTRACT(EPOCH FROM created_at) * 1000000)::bigint AS created_at_unix_micros,
-    (EXTRACT(EPOCH FROM updated_at) * 1000000)::bigint AS updated_at_unix_micros
+    {expires} AS expires_at_unix_micros,
+    {created} AS created_at_unix_micros,
+    {updated} AS updated_at_unix_micros
  FROM tx4_infra.transactions
- WHERE tenant_id = $1 AND id = $2";
+ WHERE tenant_id = $1 AND id = $2",
+        expires = crate::sql_support::ts_unix_micros_expr("expires_at"),
+        created = crate::sql_support::ts_unix_micros_expr("created_at"),
+        updated = crate::sql_support::ts_unix_micros_expr("updated_at"),
+    )
+}
 
-const LOCK_SQL: &str = "SELECT
+fn lock_sql() -> String {
+    format!(
+        "SELECT
     id, tenant_id, primary_state, version,
     amount_atomic, currency_id, attempt_budget,
-    (EXTRACT(EPOCH FROM expires_at) * 1000000)::bigint AS expires_at_unix_micros,
-    (EXTRACT(EPOCH FROM created_at) * 1000000)::bigint AS created_at_unix_micros,
-    (EXTRACT(EPOCH FROM updated_at) * 1000000)::bigint AS updated_at_unix_micros
+    {expires} AS expires_at_unix_micros,
+    {created} AS created_at_unix_micros,
+    {updated} AS updated_at_unix_micros
  FROM tx4_infra.transactions
  WHERE tenant_id = $1 AND id = $2
- FOR UPDATE";
+ FOR UPDATE",
+        expires = crate::sql_support::ts_unix_micros_expr("expires_at"),
+        created = crate::sql_support::ts_unix_micros_expr("created_at"),
+        updated = crate::sql_support::ts_unix_micros_expr("updated_at"),
+    )
+}
 
 #[derive(Debug, sqlx::FromRow)]
 struct TransactionRow {
@@ -226,7 +240,7 @@ async fn lock_and_load(
     tenant_id: &TenantId,
     id: &TransactionId,
 ) -> Result<Transaction, ApplicationError> {
-    let row = sqlx::query_as::<_, TransactionRow>(LOCK_SQL)
+    let row = sqlx::query_as::<_, TransactionRow>(&lock_sql())
         .bind(tenant_id.as_str())
         .bind(id.as_str())
         .fetch_optional(&mut **db_tx)
