@@ -1250,10 +1250,49 @@ Single-node acceptable for small self-host; split API/worker processes even on o
 
 ### Phase 2 — Persistence / transaction engine
 
-- **Deliverables:** PostgreSQL schema/migrations, repositories, `FOR UPDATE` transitions, idempotency reservation protocol, outbox lease protocol, **PaymentProvider port + Mock adapter** (interface ownership stays in `tx4-application`; Mock for foundational tests)
+Phase 2 remains the aggregate planning phase for the durable transaction engine. Its original deliverables are unchanged in intent:
+
+- PostgreSQL schema/migrations
+- repositories
+- `FOR UPDATE` transitions
+- idempotency reservation protocol (§9)
+- outbox lease protocol (§11)
+- **PaymentProvider port + Mock adapter** (§12; interface ownership stays in `tx4-application`; Mock for foundational tests)
+
 - **Invariants:** durable state; concurrency precedence; compensating intent atomicity; no blind re-execution
 - **Tests:** integration concurrency/idempotency/recovery/outbox reclaim
 - **Exit:** engine proof on Mock clock/provider ports
+
+To make implementation gates auditable, Phase 2 is decomposed into the following **lettered milestones**. Lettered milestones do **not** invent new subsystems; they only bound already-frozen Phase-2 requirements. Normative semantics remain in §8–§12 (and related sections); this subsection only assigns milestone ownership.
+
+#### Phase 2A — PostgreSQL Transaction Engine Schema Foundation
+
+- **Status:** **COMPLETE / FROZEN** (implementation HEAD `22567a13a1af3bb6661eec91e3b0f41144b17884`)
+- **Deliverables:** PostgreSQL schema/migrations for the transaction aggregate foundation under `crates/tx4-persistence/migrations/`
+- **Does not include:** repositories, `FOR UPDATE` mutation paths, idempotency, outbox, PaymentProvider/Mock, API business workflows
+- **Exit:** migration validation + schema foundation tests against real PostgreSQL
+
+#### Phase 2B — Durable Transaction Repository & Concurrency Boundary
+
+- **Status:** **COMPLETE / FROZEN** (implementation HEAD `366855fd6448d3b729ddaa2918383c0fd7e80211`; P2-1 ReplayDuplicate durable-return remediated)
+- **Deliverables:** durable Transaction Repository; PostgreSQL aggregate mapping; `SELECT … FOR UPDATE` mutation boundary; version/concurrency control; tenant-scoped load/mutate; Phase-1F lifecycle integration at the repository boundary; atomic persistence; PostgreSQL concurrency/integration tests
+- **Does not include:** idempotency reservation, outbox lease/fencing, PaymentProvider execution, real providers, webhooks, ledger/settlement/reconciliation/billing
+- **Exit:** repository + concurrency invariants proven on real PostgreSQL; cargo fmt/check/test/clippy green
+
+#### Phase 2C — Durable Idempotency, Outbox & Payment Boundary
+
+- **Status:** **DEFINED — NOT IMPLEMENTED**; **implementation NOT authorized by this scope-definition update**
+- **Next gate:** separate `PHASE-2C-IMPLEMENTATION-AUTHORIZATION` (then implementation only if authorized)
+- **Prereqs:** Phase 2A frozen; Phase 2B frozen
+- **Deliverables (ONLY):**
+  1. **Durable idempotency reservation protocol** as already specified in §9 (tenant-scoped key, fingerprint, stored response contract, `IN_PROGRESS` / completed / failed-closed semantics, lease/expiry, crash reclaim, duplicate/fingerprint-conflict behavior, concurrency, atomicity with the business operation, `operation_id` uniqueness, no blind re-execution under a valid lease, restart durability)
+  2. **Durable outbox lease protocol** as already specified in §11 (`PENDING` / `RUNNING` / `SUCCEEDED` / `DEAD_LETTER`, lease/visibility timeout, `claim_epoch` fencing, conditional completion, stale-worker no-op, reclaim after crash, retry/backoff, poison/dead-letter handling, idempotent handler boundary, `FOR UPDATE SKIP LOCKED` where specified, durable worker recovery). **No external message broker.**
+  3. **PaymentProvider port + Mock adapter** as already specified in §12 (`createPayment`, `capture`, `refund`, `getPaymentStatus`; Mock deterministic test behavior; application-level interface ownership). **No real providers** (Xendit/DOKU/Midtrans remain Phase 4).
+- **Explicitly out of scope for Phase 2C:** real payment provider integrations; provider webhooks; full production payment execution workflows; PaymentAttempt production execution beyond what is strictly required to establish the generic PaymentProvider/Mock boundary; ledger posting; settlement execution; reconciliation engine; commercial/usage billing; subscriptions; Cloud control plane; managed dashboard; OAuth/external IdP; advanced analytics; dogfood apps; vertical-specific logic; frontend; SDK; production Cloud deployment
+- **Tests:** PostgreSQL integration; concurrency; crash/recovery; idempotency; outbox fencing/reclaim; deterministic Mock behavior
+- **Exit:** all Phase-2C deliverables above proven; cargo fmt/check/test/clippy green; no Phase-4/5/6/7/8 functionality pulled forward
+
+Lettering dependency inside Phase 2: **2A → 2B → 2C**. Aggregate Phase-2 exit still requires Phase 2C complete.
 
 ### Phase 3 — API / authentication baseline
 
@@ -1293,7 +1332,7 @@ Single-node acceptable for small self-host; split API/worker processes even on o
 - **Invariants:** OSS runnable without Cloud; ADR-008 boundary intact
 - **Exit:** Definition of Done checklist (§32) satisfied for initial production cut
 
-Dependency graph: 1→2→3→4; 5–7 after 2; 8 continuous after 3.
+Dependency graph: 1→2→3→4; inside Phase 2: 2A→2B→2C; 5–7 after 2; 8 continuous after 3.
 
 ---
 
@@ -1382,3 +1421,4 @@ Next gate: **IMPLEMENTATION-AUTHORIZATION** (explicit task required before code)
 | 2026-09-25 | TASK-018R remediated AUDIT-021 findings (persistence taxonomy, idempotency/outbox leases, money intermediates, locks, PaymentAttempt, ops contract) |
 | 2026-09-25 | TASK-018RR remediated AUDIT-022 findings (SUBMITTED-before-I/O, outbox fencing, taxonomy, worktree integrity) |
 | 2026-09-25 | FREEZE-012 froze implementation architecture (basis AUDIT-023 PASS) |
+| 2026-09-26 | PHASE-2C-SCOPE-DEFINITION: §31 decomposes Phase 2 into lettered milestones 2A (frozen), 2B (frozen), 2C (defined, not authorized/implemented); normative §9/§11/§12 unchanged |
