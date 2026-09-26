@@ -1295,13 +1295,93 @@ To make implementation gates auditable, Phase 2 is decomposed into the following
 - **Tests:** PostgreSQL integration; concurrency; crash/recovery; idempotency; outbox fencing/reclaim; deterministic Mock behavior; atomic unit-of-work; reclaim TOCTOU / reconcile-first locking
 - **Exit:** satisfied — all Phase-2C deliverables above proven; cargo fmt/check/test/clippy green; no Phase-4/5/6/7/8 functionality pulled forward
 
-Lettering dependency inside Phase 2: **2A → 2B → 2C**. Lettered milestones **2A, 2B, and 2C are COMPLETE / FROZEN**. Aggregate Phase-2 lettered exit is satisfied; Phase 3 remains separately defined and is **not** authorized by this freeze.
+Lettering dependency inside Phase 2: **2A → 2B → 2C**. Lettered milestones **2A, 2B, and 2C are COMPLETE / FROZEN**. Aggregate Phase-2 lettered exit is satisfied.
 
 ### Phase 3 — API / authentication baseline
 
-- **Deliverables:** Axum `/v1` skeleton, OpenAPI bootstrap, API keys, tenant context, error mapping
-- **Invariants:** ADR-005 path versioning; authz checks
-- **Exit:** contract tests for initial routes
+- **Status:** **SCOPE FROZEN** (PHASE-3-SCOPE-DEFINITION-AND-FREEZE); **implementation NOT authorized by this scope freeze**
+- **Canonical title:** API / authentication baseline
+- **Objective:** Establish the public OSS `/v1` HTTP API authentication, authorization, tenant-context, OpenAPI contract bootstrap, and consistent error-mapping baseline on top of the frozen Phase-1E server/API foundation and frozen Phase-2C durability engine — without implementing later-phase business workflows, SDKs, providers, or Cloud.
+- **Next gate:** separate `PHASE-3-IMPLEMENTATION-AUTHORIZATION` (then implementation only if authorized)
+- **Governance note (numbering resolution):** Frozen Implementation Architecture §31 is the **canonical** implementation-phase numbering for Phase 3+. Historical `ROADMAP.md` “Phase 3 — Transaction Infrastructure” described work already realized under IA Phase 1 (domain/lifecycle) and Phase 2A/2B/2C (persistence, idempotency, outbox, PaymentProvider/Mock). That historical Roadmap meaning is **superseded for numbering**; it is **not** the next implementation milestone. API/SDK packaging remains a **later** Roadmap concern; Phase 3 is the **API/auth baseline**, not TypeScript/other SDK delivery.
+
+#### Phase 3 — Prerequisites
+
+- Phase 2A FROZEN; Phase 2B FROZEN; Phase 2C FROZEN (implementation baseline `7174a227067a2085238899d744a1000226baa7a0`; freeze record `4150879559fc3f2d1d066a6c6bb55da21ef4a5a2`)
+- ADR-001…008 FROZEN
+- Phase-1E API/server bootstrap present (`tx4-api` / `tx4-server` health/ready only; no business `/v1` routes yet)
+- PostgreSQL persistence, durable idempotency, outbox fencing, PaymentProvider/Mock, PaymentAttempt boundary available as frozen infrastructure to **call into**, not redefine
+
+#### Phase 3 — Deliverables (ONLY)
+
+1. **`/v1` Axum skeleton** under ADR-005 path versioning (`/v1/...`), additive to existing non-versioned infrastructure health/ready routes; unsupported `/v{N}` MUST return an explicit error (ADR-005 / IA §18.1). Exact business endpoint catalog remains **OPEN** (IA §2.12 / §18.4) — Phase 3 MUST NOT invent a full transaction CRUD surface beyond what is required to prove authn/authz/tenant/error/OpenAPI wiring.
+2. **OpenAPI bootstrap** as the public contract artifact for the Phase-3 `/v1` surface (IA §2.8 / §18.1; Master Spec §19). Contract MUST stay authoritative for published shapes introduced in Phase 3.
+3. **API key authentication primitive** for OSS (IA §19.2): create/validate/revoke (or equivalent minimal lifecycle) of API keys bound to a `tenant_id`; secrets never committed; storage via durable PostgreSQL under `tx4_infra` with explicit migration(s). OAuth/OIDC/external IdP remain **OPEN** / out of Phase 3.
+4. **Tenant context + authorization checks** on protected `/v1` routes: `authenticated ≠ authorized`; every tenant-scoped operation MUST carry and enforce `tenant_id` (Master Spec §18; IA §19; ADR-004 isolation). Cross-tenant access MUST be rejected by design.
+5. **Consistent HTTP error mapping** from application/domain error classes to HTTP responses per IA §22 (no sensitive leakage; provider timeout/uncertainty MUST NOT be mapped as terminal business `FAILED`).
+6. **Request correlation** support (request/correlation id propagation into logs/spans) for `/v1` requests (Master Spec §19; IA §18.3 / §21) without making telemetry authoritative.
+7. **HTTP ↔ application boundary wiring** that preserves frozen Phase-2C semantics when invoking application ports (including the ability for authorized `/v1` commands to supply idempotency key / operation identity into the existing idempotency protocol). Phase 3 MUST NOT weaken atomic unit-of-work, reclaim, fencing, or PaymentAttempt rules.
+
+#### Phase 3 — Explicit exclusions
+
+- Real payment provider integrations; production webhook ingest; PaymentAttempt production execution workflows beyond Mock/port wiring already frozen in Phase 2C (remain Phase 4)
+- Ledger posting; fee product implementation; settlement execution; reconciliation engine (Phases 5/7)
+- Usage metering / commercial billing / subscriptions (Phase 6 / Cloud)
+- TypeScript or other SDKs; generated client packages as a Phase-3 deliverable (later API/SDK packaging phase)
+- OAuth/OIDC / mandatory third-party IdP; Cloud org/project control-plane auth (ADR-008 / IA §19.2–19.3)
+- Cloud control plane, managed dashboard, dogfood apps, frontend, vertical-specific logic
+- Complete public endpoint catalog; pagination/filtering productization beyond what a minimal authenticated `/v1` proof route requires (remain OPEN / later additive under `/v1`)
+- Redis/Kafka/external broker; event sourcing; CQRS; competing authoritative balances
+- Rewriting or relaxing Phase-2C frozen guarantees (idempotency, UoW, outbox fencing, PaymentAttempt locking/TOCTOU/reconcile-first, financial safety)
+
+#### Phase 3 — Phase-2C boundary preservation (normative)
+
+Phase 3 MUST preserve without weakening, replacing, bypassing, or redefining:
+
+durable idempotency; atomic PostgreSQL unit-of-work; idempotency concurrency/recovery; durable outbox; outbox lease/fencing/recovery; PaymentProvider port; MockPaymentProvider; PaymentAttempt durable boundary; reconcile-first; TOCTOU protection; PaymentAttempt row locking; lock ordering; deadlock safety; crash recovery; concurrency safety; PostgreSQL durability; ADR-006 financial safety; dependency direction (`tx4-domain` → `tx4-application` → adapters).
+
+#### Phase 3 — Source-of-truth mapping
+
+| Deliverable | Master Spec | IA | ADR / notes |
+| --- | --- | --- | --- |
+| `/v1` skeleton | §19 | §18.1, §31 Phase 3 | ADR-005 |
+| OpenAPI bootstrap | §19 | §2.8, §18.1 | ADR-005 |
+| API keys | §19, §25 | §19.2, §20 | ADR-004 tenancy; auth mechanism detail OPEN beyond API-key primitive |
+| Tenant context / authz | §18, §25 | §19, §20 | ADR-004 |
+| Error mapping | §19 | §22 | Application error taxonomy (Phase-1D+) |
+| Correlation ids | §19 | §18.3, §21 | Observability non-authority (IA §21) |
+| Idempotency wiring | §19 | §9, §18.2 | Uses frozen Phase-2C protocol; does not redefine it |
+
+#### Phase 3 — Acceptance criteria (implementation)
+
+When implementation is later authorized, evidence MUST include:
+
+- Contract/integration tests for `/v1` versioning behavior and unsupported-version errors
+- Authn tests: valid API key accepted; missing/invalid key rejected
+- Authz/tenant-isolation tests: cross-tenant access denied; `authenticated ≠ authorized`
+- Error-mapping tests for representative validation/conflict/idempotency/retryable classes (IA §22)
+- OpenAPI artifact present and covering Phase-3 published `/v1` shapes
+- Regression: Phase-2B ReplayDuplicate; Phase-2C idempotency/outbox/PaymentAttempt/UoW/TOCTOU tests remain green
+- Financial safety: no `f32`/`f64` monetary authority; ADR-006 intact
+- Dependency direction preserved; no domain←persistence inversion
+- `cargo fmt --check`, `cargo check --workspace --all-targets`, `cargo test --workspace --all-targets`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+
+#### Phase 3 — Post-implementation independent audit gate
+
+Required after authorized implementation (and any remediation):
+
+- scope compliance vs this Phase-3 freeze
+- architecture/ADR compliance
+- Phase-2C boundary preservation (full list above)
+- tenant isolation; financial safety; durability; dependency direction
+- test quality / real PostgreSQL where required
+- no unauthorized scope; no architecture drift; no SoT drift
+
+#### Phase 3 — Freeze gate (after implementation)
+
+Phase 3 implementation may freeze only when: independent audit PASS / FREEZE_READY; P0–P2 NONE; blocking P3 NONE; blockers NONE; Phase-2C guarantees intact; HEAD clean; governance documents record COMPLETE/FROZEN with implementation baseline commit.
+
+- **Exit (scope freeze):** this subsection is the authoritative Phase-3 implementation scope; coding requires separate `PHASE-3-IMPLEMENTATION-AUTHORIZATION`
 
 ### Phase 4 — Payment adapters + webhooks
 
@@ -1426,3 +1506,4 @@ Next gate: **IMPLEMENTATION-AUTHORIZATION** (explicit task required before code)
 | 2026-09-25 | FREEZE-012 froze implementation architecture (basis AUDIT-023 PASS) |
 | 2026-09-26 | PHASE-2C-SCOPE-DEFINITION: §31 decomposes Phase 2 into lettered milestones 2A (frozen), 2B (frozen), 2C (defined, not authorized/implemented); normative §9/§11/§12 unchanged |
 | 2026-09-26 | PHASE-2C-FREEZE: Phase 2C COMPLETE / FROZEN at HEAD `7174a227067a2085238899d744a1000226baa7a0` (final independent re-audit PASS / FREEZE_READY; P0–P3 NONE; no architecture/scope drift); normative §9/§11/§12 unchanged |
+| 2026-09-26 | PHASE-3-SCOPE-DEFINITION-AND-FREEZE: §31 Phase 3 “API / authentication baseline” formally scoped and SCOPE FROZEN; ROADMAP realigned to IA phase numbering (historical Roadmap “Phase 3 — Transaction Infrastructure” superseded for numbering; mapped to completed Phase 1–2); implementation not authorized; normative §9/§11/§12/§18/§19 unchanged |
