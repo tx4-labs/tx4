@@ -189,6 +189,49 @@ async fn repository_round_trip_and_concurrency() {
     let loaded_max = repo.find(&tenant, &id_max).await.unwrap().unwrap();
     assert_eq!(loaded_max.amount_atomic(), Some(i64::MAX));
 
+    // P2-1 regression: ReplayDuplicate / IdempotentNoOp must return durable aggregate.
+    let id_noop = TransactionId::new("tx-replay-noop").unwrap();
+    let noop_base = Transaction::new_created(
+        id_noop.clone(),
+        tenant.clone(),
+        Some(money_idr(99)),
+        None,
+        None,
+        1_700_000_000_800_000,
+    )
+    .unwrap();
+    repo.insert(&noop_base).await.unwrap();
+    let before_noop = repo.find(&tenant, &id_noop).await.unwrap().unwrap();
+    let before_state = before_noop.primary_state();
+    let before_version = before_noop.version();
+    let before_updated_at = before_noop.updated_at_unix_micros();
+
+    let returned_noop = repo
+        .apply_transition(
+            &tenant,
+            &id_noop,
+            before_version,
+            &LifecycleCommand::ReplayDuplicate {
+                resulting_state: TransactionState::Created,
+            },
+            &LifecycleContext::empty(),
+            1_700_000_000_900_000, // must not appear on returned or durable aggregate
+        )
+        .await
+        .expect("idempotent replay");
+    let reloaded_noop = repo.find(&tenant, &id_noop).await.unwrap().unwrap();
+
+    assert_eq!(returned_noop, reloaded_noop);
+    assert_eq!(returned_noop.primary_state(), before_state);
+    assert_eq!(returned_noop.version(), before_version);
+    assert_eq!(returned_noop.updated_at_unix_micros(), before_updated_at);
+    assert_eq!(reloaded_noop.updated_at_unix_micros(), before_updated_at);
+    assert_ne!(
+        returned_noop.updated_at_unix_micros(),
+        1_700_000_000_900_000,
+        "no-op must not fabricate a non-durable updated_at"
+    );
+
     // Concurrent mutation: two tasks with same expected version — exactly one commits.
     let id_c = TransactionId::new("tx-concurrent").unwrap();
     let base =

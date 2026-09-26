@@ -176,10 +176,14 @@ async fn apply_once(
         .apply(command, ctx, updated_at_unix_micros)
         .map_err(map_domain_err)?;
 
-    if next.version() != current.version() || next.primary_state() != current.primary_state() {
-        persist_update(&mut db_tx, &next, expected_version).await?;
+    // IdempotentNoOp (e.g. ReplayDuplicate): durable row unchanged — return the locked
+    // aggregate so callers never observe a non-persisted updated_at (Phase-2B P2-1).
+    if next.version() == current.version() && next.primary_state() == current.primary_state() {
+        db_tx.commit().await.map_err(map_sqlx_err)?;
+        return Ok(current);
     }
 
+    persist_update(&mut db_tx, &next, expected_version).await?;
     db_tx.commit().await.map_err(map_sqlx_err)?;
     Ok(next)
 }
