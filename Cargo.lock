@@ -1615,6 +1615,7 @@ dependencies = [
 name = "tx4-adapters-payment"
 version = "0.0.0"
 dependencies = [
+ "tokio",
  "tx4-application",
  "tx4-domain",
 ]
@@ -1678,6 +1679,7 @@ version = "0.0.0"
 dependencies = [
  "sqlx",
  "tokio",
+ "tx4-adapters-payment",
  "tx4-application",
  "tx4-config",
  "tx4-domain",
