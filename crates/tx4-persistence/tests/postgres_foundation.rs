@@ -61,13 +61,10 @@ async fn migrate_twice_is_idempotent_and_health_ok() {
     .expect("schema existence query");
     assert!(schema_exists);
 
-    // Phase-2A authorizes tx4_infra.transactions only among business aggregates.
-    // Later Phase-2 tables (idempotency/outbox/PaymentAttempt/…) remain absent here.
+    // Phase-1C foundation only: Phase-2C tables are authorized separately.
+    // Still forbid later-phase (ledger/settlement/…) and public-schema business tables.
     for forbidden in [
         "payments",
-        "payment_attempts",
-        "idempotency_records",
-        "outbox_jobs",
         "ledger_entries",
         "settlements",
         "reconciliation_records",
@@ -89,6 +86,21 @@ async fn migrate_twice_is_idempotent_and_health_ok() {
                 "forbidden business table present: {schema}.{forbidden}"
             );
         }
+    }
+
+    // Public schema must not host Phase-2C operational tables.
+    for name in ["idempotency_records", "outbox_jobs", "payment_attempts"] {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = $1
+             )",
+        )
+        .bind(name)
+        .fetch_one(&pool)
+        .await
+        .expect("public table query");
+        assert!(!exists, "Phase-2C table leaked to public: {name}");
     }
 
     close_pool(&pool).await;

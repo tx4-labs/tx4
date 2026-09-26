@@ -9,3 +9,7 @@ description = "TX4 payment provider adapter boundary (no provider SDKs in Phase-
 [dependencies]
 tx4-application = { workspace = true }
 tx4-domain = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

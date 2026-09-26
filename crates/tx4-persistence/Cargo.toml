@@ -16,3 +16,4 @@ tx4-domain = { workspace = true }
 [dev-dependencies]
 sqlx = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tx4-adapters-payment = { workspace = true }

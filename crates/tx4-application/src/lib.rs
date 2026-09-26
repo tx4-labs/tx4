@@ -2,6 +2,7 @@
 //!
 //! Ports for infrastructure adapters are defined here (frozen architecture).
 //! Phase-2B: durable `TransactionRepository` port.
+//! Phase-2C: idempotency, outbox, PaymentAttempt, PaymentProvider ports.
 
 #![forbid(unsafe_code)]
 
@@ -11,7 +12,12 @@ pub mod ports;
 
 pub use context::RequestContext;
 pub use error::ApplicationError;
-pub use ports::TransactionRepository;
+pub use ports::{
+    ClaimedOutboxJob, IdempotencyBeginOutcome, IdempotencyBeginRequest, IdempotencyRepository,
+    IdempotencyReservation, IdempotencyStatus, OutboxJob, OutboxRepository, OutboxStatus,
+    PaymentAttempt, PaymentAttemptRepository, PaymentAttemptStatus, PaymentIntent, PaymentProvider,
+    ProviderObservation, ProviderRef, TransactionRepository,
+};
 pub use tx4_domain;
 
 /// Marker that the application crate is linked and compilable.

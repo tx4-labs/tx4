@@ -69,12 +69,9 @@ async fn transaction_schema_foundation() {
     .expect("schema existence query");
     assert!(schema_exists);
 
-    // Unauthorized business tables still absent (schema + public).
+    // Unauthorized later-phase tables still absent (schema + public).
     for forbidden in [
         "payments",
-        "payment_attempts",
-        "idempotency_records",
-        "outbox_jobs",
         "ledger_entries",
         "settlements",
         "reconciliation_records",
@@ -86,6 +83,15 @@ async fn transaction_schema_foundation() {
         assert!(
             !table_exists(&pool, "tx4_infra", forbidden).await,
             "forbidden tx4_infra table present: {forbidden}"
+        );
+    }
+
+    // Phase-2A scope of *this* test remains transactions; Phase-2C tables may exist
+    // after full migrate but must not live in public.
+    for name in ["idempotency_records", "outbox_jobs", "payment_attempts"] {
+        assert!(
+            !table_exists(&pool, "public", name).await,
+            "Phase-2C table leaked to public: {name}"
         );
     }
 
