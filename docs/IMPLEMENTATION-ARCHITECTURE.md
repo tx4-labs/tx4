@@ -1281,18 +1281,21 @@ To make implementation gates auditable, Phase 2 is decomposed into the following
 
 #### Phase 2C — Durable Idempotency, Outbox & Payment Boundary
 
-- **Status:** **DEFINED — NOT IMPLEMENTED**; **implementation NOT authorized by this scope-definition update**
-- **Next gate:** separate `PHASE-2C-IMPLEMENTATION-AUTHORIZATION` (then implementation only if authorized)
+- **Status:** **COMPLETE / FROZEN** (implementation HEAD `7174a227067a2085238899d744a1000226baa7a0`; final independent re-audit PASS / FREEZE_READY)
+- **Freeze path:** scope baseline `fdbc9b6fddc1dc63f4a9e53c4d178239cd0b25e5` → original implementation tip `0ae9419e308f994cd30669be172947c044ed0ea5` → remediation `89dfe8771d84791ff9a0f150a139d2079d2b2bf9` → TOCTOU remediation / freeze baseline `7174a227067a2085238899d744a1000226baa7a0` → PHASE-2C-FINAL-INDEPENDENT-RE-AUDIT PASS
+- **Verified at freeze:** atomic PostgreSQL unit-of-work; durable idempotency; idempotency concurrency safety; idempotency recovery; durable outbox; outbox lease/fencing; outbox recovery; PaymentProvider port; MockPaymentProvider; PaymentAttempt durable boundary; reconcile-first recovery; PaymentAttempt row locking; TOCTOU protection; lock ordering; deadlock safety; PostgreSQL persistence; migrations; crash recovery; concurrency; financial safety; durability; dependency direction; Phase-2B ReplayDuplicate regression preserved
+- **Findings at freeze:** P0 NONE; P1 NONE; P2 NONE; P3 NONE; BLOCKERS NONE; ARCHITECTURE_DRIFT NONE; SCOPE_DRIFT NONE; UNAUTHORIZED_IMPLEMENTATION NONE
+- **Semantics preserved:** at-least-once processing + durable state + idempotency + unique operation identity + reconciliation (**no** universal exactly-once claim)
 - **Prereqs:** Phase 2A frozen; Phase 2B frozen
 - **Deliverables (ONLY):**
   1. **Durable idempotency reservation protocol** as already specified in §9 (tenant-scoped key, fingerprint, stored response contract, `IN_PROGRESS` / completed / failed-closed semantics, lease/expiry, crash reclaim, duplicate/fingerprint-conflict behavior, concurrency, atomicity with the business operation, `operation_id` uniqueness, no blind re-execution under a valid lease, restart durability)
   2. **Durable outbox lease protocol** as already specified in §11 (`PENDING` / `RUNNING` / `SUCCEEDED` / `DEAD_LETTER`, lease/visibility timeout, `claim_epoch` fencing, conditional completion, stale-worker no-op, reclaim after crash, retry/backoff, poison/dead-letter handling, idempotent handler boundary, `FOR UPDATE SKIP LOCKED` where specified, durable worker recovery). **No external message broker.**
   3. **PaymentProvider port + Mock adapter** as already specified in §12 (`createPayment`, `capture`, `refund`, `getPaymentStatus`; Mock deterministic test behavior; application-level interface ownership). **No real providers** (Xendit/DOKU/Midtrans remain Phase 4).
 - **Explicitly out of scope for Phase 2C:** real payment provider integrations; provider webhooks; full production payment execution workflows; PaymentAttempt production execution beyond what is strictly required to establish the generic PaymentProvider/Mock boundary; ledger posting; settlement execution; reconciliation engine; commercial/usage billing; subscriptions; Cloud control plane; managed dashboard; OAuth/external IdP; advanced analytics; dogfood apps; vertical-specific logic; frontend; SDK; production Cloud deployment
-- **Tests:** PostgreSQL integration; concurrency; crash/recovery; idempotency; outbox fencing/reclaim; deterministic Mock behavior
-- **Exit:** all Phase-2C deliverables above proven; cargo fmt/check/test/clippy green; no Phase-4/5/6/7/8 functionality pulled forward
+- **Tests:** PostgreSQL integration; concurrency; crash/recovery; idempotency; outbox fencing/reclaim; deterministic Mock behavior; atomic unit-of-work; reclaim TOCTOU / reconcile-first locking
+- **Exit:** satisfied — all Phase-2C deliverables above proven; cargo fmt/check/test/clippy green; no Phase-4/5/6/7/8 functionality pulled forward
 
-Lettering dependency inside Phase 2: **2A → 2B → 2C**. Aggregate Phase-2 exit still requires Phase 2C complete.
+Lettering dependency inside Phase 2: **2A → 2B → 2C**. Lettered milestones **2A, 2B, and 2C are COMPLETE / FROZEN**. Aggregate Phase-2 lettered exit is satisfied; Phase 3 remains separately defined and is **not** authorized by this freeze.
 
 ### Phase 3 — API / authentication baseline
 
@@ -1422,3 +1425,4 @@ Next gate: **IMPLEMENTATION-AUTHORIZATION** (explicit task required before code)
 | 2026-09-25 | TASK-018RR remediated AUDIT-022 findings (SUBMITTED-before-I/O, outbox fencing, taxonomy, worktree integrity) |
 | 2026-09-25 | FREEZE-012 froze implementation architecture (basis AUDIT-023 PASS) |
 | 2026-09-26 | PHASE-2C-SCOPE-DEFINITION: §31 decomposes Phase 2 into lettered milestones 2A (frozen), 2B (frozen), 2C (defined, not authorized/implemented); normative §9/§11/§12 unchanged |
+| 2026-09-26 | PHASE-2C-FREEZE: Phase 2C COMPLETE / FROZEN at HEAD `7174a227067a2085238899d744a1000226baa7a0` (final independent re-audit PASS / FREEZE_READY; P0–P3 NONE; no architecture/scope drift); normative §9/§11/§12 unchanged |
